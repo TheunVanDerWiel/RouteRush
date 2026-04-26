@@ -18,7 +18,7 @@ const teamPinEl = document.getElementById('team-pin');
 let myPlayerId = playerIdInitial;
 let myTeamId = null;
 
-const POLL_INTERVAL_MS = 2000;
+const POLL_INTERVAL_MS = 5000;
 let pollTimer = null;
 
 async function fetchState() {
