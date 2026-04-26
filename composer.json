@@ -1,0 +1,17 @@
+{
+    "name": "route-rush/app",
+    "description": "Real-world Ticket to Ride companion app",
+    "type": "project",
+    "license": "proprietary",
+    "require": {
+        "php": ">=8.2"
+    },
+    "autoload": {
+        "psr-4": {
+            "RouteRush\\": "src/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    }
+}

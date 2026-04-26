@@ -1,0 +1,5 @@
+# Fallback for shared hosts where the docroot can't be set to public/.
+# If you can point the docroot directly at public/, this file is harmless.
+RewriteEngine On
+RewriteCond %{REQUEST_URI} !^/public/
+RewriteRule ^(.*)$ public/$1 [L]
