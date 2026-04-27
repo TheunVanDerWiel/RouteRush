@@ -46,10 +46,10 @@ use RouteRush\View;
             · next window in <span class="mono" id="next-window">--:--</span>
         </p>
         <div class="action-grid">
-            <button type="button" disabled>Draw 2 cards</button>
-            <button type="button" disabled>Draw tickets</button>
-            <button type="button" disabled>Trade 3 → 2</button>
-            <button type="button" disabled>Trade 3 → loco</button>
+            <button type="button" id="btn-draw-cards" disabled>Draw 2 cards</button>
+            <button type="button" id="btn-draw-tickets" disabled>Draw tickets</button>
+            <button type="button" id="btn-trade-3-2" disabled>Trade 3 → 2</button>
+            <button type="button" id="btn-trade-3-loco" disabled>Trade 3 → loco</button>
         </div>
         <p class="hint">Tap a route on the map to claim it.</p>
     </section>

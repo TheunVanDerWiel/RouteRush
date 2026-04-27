@@ -483,9 +483,24 @@ final class GameController
             $hand[(string) (int) $h['color_id']] = (int) $h['count'];
         }
 
-        $stmt = $this->pdo->prepare('SELECT locomotives_in_hand FROM game_teams WHERE id = ?');
+        $stmt = $this->pdo->prepare(
+            'SELECT locomotives_in_hand, windows_consumed FROM game_teams WHERE id = ?'
+        );
         $stmt->execute([$teamId]);
-        $locoInHand = (int) $stmt->fetch()['locomotives_in_hand'];
+        $teamRow         = $stmt->fetch();
+        $locoInHand      = (int) $teamRow['locomotives_in_hand'];
+        $windowsConsumed = (int) $teamRow['windows_consumed'];
+
+        $windowsAvailable     = 0;
+        $nextWindowInSeconds  = null;
+        if ($row['started_at'] !== null && $row['status'] === 'in_progress') {
+            $startedAt = new \DateTimeImmutable($row['started_at'], new \DateTimeZone('UTC'));
+            $now       = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+            $elapsed   = max(0, $now->getTimestamp() - $startedAt->getTimestamp());
+            $accrued   = intdiv($elapsed, 300) + 1;
+            $windowsAvailable    = max(0, $accrued - $windowsConsumed);
+            $nextWindowInSeconds = 300 - ($elapsed % 300);
+        }
 
         $stmt = $this->pdo->prepare(
             'SELECT c.route_id, t.color_index
@@ -535,11 +550,13 @@ final class GameController
                 'locomotives_remaining' => (int) $row['locomotives_remaining'],
             ],
             'team' => [
-                'id'                  => $teamId,
-                'hand'                => (object) $hand,
-                'locomotives_in_hand' => $locoInHand,
-                'tickets'             => $tickets,
-                'pending_tickets'     => $pending,
+                'id'                     => $teamId,
+                'hand'                   => (object) $hand,
+                'locomotives_in_hand'    => $locoInHand,
+                'windows_available'      => $windowsAvailable,
+                'next_window_in_seconds' => $nextWindowInSeconds,
+                'tickets'                => $tickets,
+                'pending_tickets'        => $pending,
             ],
             'claims' => $claims,
         ]);
@@ -750,6 +767,153 @@ final class GameController
                 'route_id' => $routeId,
                 'team_id'  => $teamId,
             ],
+        ]);
+    }
+
+    public function drawCards(string $code): Response
+    {
+        $playerId = $_SESSION['player_id'] ?? null;
+        if ($playerId === null) {
+            return self::error('not_authenticated', 'Sign in by creating or joining a team first', 401);
+        }
+
+        $code = strtoupper($code);
+
+        $this->pdo->beginTransaction();
+        try {
+            $stmt = $this->pdo->prepare(
+                'SELECT g.id AS game_id, g.status, g.started_at, g.deck_counter, g.locomotives_remaining,
+                        t.id AS team_id, t.windows_consumed, t.locomotives_in_hand,
+                        (SELECT COUNT(*) FROM game_team_tickets WHERE team_id = t.id AND status = \'pending\') AS pending_tickets
+                   FROM games g
+                   JOIN game_players p ON p.id = ?
+                   JOIN game_teams   t ON t.id = p.team_id AND t.game_id = g.id
+                  WHERE g.room_code = ?
+                    FOR UPDATE'
+            );
+            $stmt->execute([(int) $playerId, $code]);
+            $row = $stmt->fetch();
+            if ($row === false) {
+                $this->pdo->rollBack();
+                return self::error('wrong_game', 'You are not part of this game', 403);
+            }
+            if ($row['status'] !== 'in_progress') {
+                $this->pdo->rollBack();
+                return self::error('game_not_in_progress', 'Game is not in progress', 409);
+            }
+            if ((int) $row['pending_tickets'] > 0) {
+                $this->pdo->rollBack();
+                return self::error('pending_tickets', 'Decide on pending tickets before drawing', 409);
+            }
+
+            $gameId      = (int) $row['game_id'];
+            $teamId      = (int) $row['team_id'];
+            $consumed    = (int) $row['windows_consumed'];
+            $locoInHand  = (int) $row['locomotives_in_hand'];
+            $locoInPool  = (int) $row['locomotives_remaining'];
+
+            $startedAt = new \DateTimeImmutable($row['started_at'], new \DateTimeZone('UTC'));
+            $now       = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+            $elapsed   = max(0, $now->getTimestamp() - $startedAt->getTimestamp());
+            $accrued   = intdiv($elapsed, 300) + 1;
+            $available = max(0, $accrued - $consumed);
+            if ($available <= 0) {
+                $this->pdo->rollBack();
+                return self::error('no_draw_window', 'No draw windows available yet', 422);
+            }
+
+            // Build weighted pool: each color row + a locomotive entry.
+            $stmt = $this->pdo->prepare(
+                'SELECT color_id, count FROM game_card_pool WHERE game_id = ?'
+            );
+            $stmt->execute([$gameId]);
+            $weights = [];   // list of ['type' => color_id|null, 'w' => count]
+            foreach ($stmt->fetchAll() as $p) {
+                $cnt = (int) $p['count'];
+                if ($cnt > 0) {
+                    $weights[] = ['type' => (int) $p['color_id'], 'w' => $cnt];
+                }
+            }
+            if ($locoInPool > 0) {
+                $weights[] = ['type' => null, 'w' => $locoInPool];
+            }
+            $total = array_sum(array_column($weights, 'w'));
+            if ($total === 0) {
+                $this->pdo->rollBack();
+                return self::error('deck_empty', 'No cards left to draw', 422);
+            }
+
+            $drawn       = [];
+            $locosDrawn  = 0;
+            $colorCounts = [];   // color_id => drawn count
+            for ($i = 0; $i < 2 && $total > 0; $i++) {
+                $pick = random_int(1, $total);
+                $cum  = 0;
+                foreach ($weights as $idx => $w) {
+                    $cum += $w['w'];
+                    if ($cum >= $pick) {
+                        if ($w['type'] === null) {
+                            $locosDrawn++;
+                        } else {
+                            $drawn[] = $w['type'];
+                            $colorCounts[$w['type']] = ($colorCounts[$w['type']] ?? 0) + 1;
+                        }
+                        $weights[$idx]['w']--;
+                        $total--;
+                        break;
+                    }
+                }
+            }
+            $totalDrawn = count($drawn) + $locosDrawn;
+
+            // Apply: pool -, hand +, deck_counter -, windows_consumed +.
+            foreach ($colorCounts as $cid => $cnt) {
+                $this->pdo->prepare(
+                    'UPDATE game_card_pool SET count = count - ? WHERE game_id = ? AND color_id = ?'
+                )->execute([$cnt, $gameId, $cid]);
+                $this->pdo->prepare(
+                    'INSERT INTO game_team_hands (team_id, color_id, count) VALUES (?, ?, ?)
+                     ON DUPLICATE KEY UPDATE count = count + VALUES(count)'
+                )->execute([$teamId, $cid, $cnt]);
+            }
+            if ($locosDrawn > 0) {
+                $this->pdo->prepare(
+                    'UPDATE games SET locomotives_remaining = locomotives_remaining - ? WHERE id = ?'
+                )->execute([$locosDrawn, $gameId]);
+                $this->pdo->prepare(
+                    'UPDATE game_teams SET locomotives_in_hand = locomotives_in_hand + ? WHERE id = ?'
+                )->execute([$locosDrawn, $teamId]);
+            }
+            $this->pdo->prepare(
+                'UPDATE games SET deck_counter = deck_counter - ? WHERE id = ?'
+            )->execute([$totalDrawn, $gameId]);
+            $this->pdo->prepare(
+                'UPDATE game_teams SET windows_consumed = windows_consumed + 1 WHERE id = ?'
+            )->execute([$teamId]);
+
+            $payload = json_encode([
+                'count'             => $totalDrawn,
+                'colors'            => $drawn,
+                'locomotives_drawn' => $locosDrawn,
+            ], JSON_THROW_ON_ERROR);
+            $this->pdo->prepare(
+                "INSERT INTO game_events (game_id, team_id, kind, payload_json)
+                 VALUES (?, ?, 'draw_train', ?)"
+            )->execute([$gameId, $teamId, $payload]);
+
+            $this->pdo->commit();
+        } catch (\Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return Response::json([
+            'ok'                 => true,
+            'drawn'              => $drawn,
+            'locomotives_drawn'  => $locosDrawn,
+            'windows_remaining'  => $available - 1,
         ]);
     }
 

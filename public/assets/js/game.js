@@ -10,6 +10,12 @@ const ticketsPendingListEl = document.getElementById('tickets-pending-list');
 const ticketsMinKeepEl = document.getElementById('tickets-min-keep');
 const ticketsDecideBtn = document.getElementById('tickets-decide-btn');
 const ticketsDecideErrorEl = document.getElementById('tickets-decide-error');
+const windowsAvailableEl = document.getElementById('windows-available');
+const nextWindowEl = document.getElementById('next-window');
+const btnDrawCards = document.getElementById('btn-draw-cards');
+const btnDrawTickets = document.getElementById('btn-draw-tickets');
+const btnTrade32 = document.getElementById('btn-trade-3-2');
+const btnTrade3Loco = document.getElementById('btn-trade-3-loco');
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -32,6 +38,7 @@ const TEAM_COLORS = (() => {
 })();
 
 let endsAtMs = null;
+let nextWindowAtMs = null;
 let mapData = null;
 let lastState = null;
 let pendingChoices = new Map();   // ticket_id -> 'keep' | 'discard'
@@ -463,7 +470,34 @@ function renderState(state) {
     deckRemainingEl.textContent = String(state.game.deck_remaining);
     renderHand(state);
     renderTickets(state);
+    renderWindows(state);
     applyClaims(state.claims || []);
+}
+
+function renderWindows(state) {
+    const team = state.team || {};
+    const available = team.windows_available;
+    windowsAvailableEl.textContent = (typeof available === 'number') ? String(available) : '—';
+    if (typeof team.next_window_in_seconds === 'number') {
+        nextWindowAtMs = Date.now() + team.next_window_in_seconds * 1000;
+    } else {
+        nextWindowAtMs = null;
+        nextWindowEl.textContent = '--:--';
+    }
+    updateActionButtons(state);
+}
+
+function updateActionButtons(state) {
+    const inProgress = state.game && state.game.status === 'in_progress';
+    const blocked    = !inProgress || hasPendingTickets(state);
+    const team       = state.team || {};
+    const windows    = team.windows_available || 0;
+    const deck       = (state.game && state.game.deck_remaining) || 0;
+    btnDrawCards.disabled   = blocked || windows <= 0 || deck <= 0;
+    btnDrawTickets.disabled = blocked || windows <= 0;
+    // Trades — slice 4
+    btnTrade32.disabled    = true;
+    btnTrade3Loco.disabled = true;
 }
 
 function hasPendingTickets(state) {
@@ -607,6 +641,76 @@ async function submitDecision() {
     if (next) renderState(next);
 }
 
+async function onDrawCards() {
+    if (hasPendingTickets(lastState)) {
+        showTicketsReminder('Decide on your tickets before drawing cards.');
+        return;
+    }
+    btnDrawCards.disabled = true;
+    const res = await fetch(`/api/games/${encodeURIComponent(code)}/draw/cards`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+    });
+    let data = null;
+    try { data = await res.json(); } catch { /* ignore */ }
+    if (!res.ok) {
+        window.alert((data && data.message) || 'Could not draw cards.');
+        const next = await fetchState();
+        if (next) renderState(next);
+        return;
+    }
+    const next = await fetchState();
+    if (next) renderState(next);
+    showDrewDialog(data.drawn || [], data.locomotives_drawn || 0);
+}
+
+function showDrewDialog(colors, locos) {
+    const dlg = document.createElement('dialog');
+    dlg.className = 'tickets-reminder-dialog';
+
+    const h = document.createElement('h3');
+    h.textContent = 'Cards drawn';
+
+    const list = document.createElement('ul');
+    list.className = 'hand-list';
+    list.style.gridTemplateColumns = 'repeat(2, 1fr)';
+    list.style.margin = '0 0 16px';
+    list.style.padding = '0';
+    list.style.listStyle = 'none';
+
+    const counts = new Map();
+    for (const cid of colors) counts.set(cid, (counts.get(cid) || 0) + 1);
+    for (const [cid, cnt] of counts) {
+        const color = mapData && mapData.colors.find((c) => c.id === cid);
+        list.appendChild(makePill({
+            label: color ? color.display_name : `#${cid}`,
+            count: cnt,
+            swatchStyle: color ? `background: ${color.hex};` : '',
+        }));
+    }
+    if (locos > 0) {
+        list.appendChild(makePill({ label: 'Loco', count: locos, loco: true }));
+    }
+    if (colors.length === 0 && locos === 0) {
+        const p = document.createElement('p');
+        p.textContent = 'No cards drawn (deck exhausted).';
+        list.replaceWith(p);
+    }
+
+    const menu = document.createElement('div');
+    menu.className = 'menu';
+    const ok = document.createElement('button');
+    ok.type = 'button';
+    ok.textContent = 'OK';
+    ok.addEventListener('click', () => dlg.close());
+    menu.appendChild(ok);
+
+    dlg.append(h, list, menu);
+    dlg.addEventListener('close', () => dlg.remove());
+    document.body.appendChild(dlg);
+    dlg.showModal();
+}
+
 function showTicketsReminder(message) {
     if (reminderOpen) return;
     reminderOpen = true;
@@ -653,15 +757,23 @@ function applyClaims(claims) {
 }
 
 function tickCountdown() {
-    if (endsAtMs === null) return;
-    const remainingMs = Math.max(0, endsAtMs - Date.now());
-    const totalSec = Math.floor(remainingMs / 1000);
-    const h = Math.floor(totalSec / 3600);
-    const m = Math.floor((totalSec % 3600) / 60);
-    const s = totalSec % 60;
-    countdownEl.textContent = h > 0
-        ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-        : `${m}:${String(s).padStart(2, '0')}`;
+    if (endsAtMs !== null) {
+        const remainingMs = Math.max(0, endsAtMs - Date.now());
+        const totalSec = Math.floor(remainingMs / 1000);
+        const h = Math.floor(totalSec / 3600);
+        const m = Math.floor((totalSec % 3600) / 60);
+        const s = totalSec % 60;
+        countdownEl.textContent = h > 0
+            ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+            : `${m}:${String(s).padStart(2, '0')}`;
+    }
+    if (nextWindowAtMs !== null) {
+        const remainingMs = Math.max(0, nextWindowAtMs - Date.now());
+        const totalSec = Math.floor(remainingMs / 1000);
+        const m = Math.floor(totalSec / 60);
+        const s = totalSec % 60;
+        nextWindowEl.textContent = `${m}:${String(s).padStart(2, '0')}`;
+    }
 }
 
 async function pollState() {
@@ -840,6 +952,7 @@ function openClaimDialog({ route, color, haveColor, haveLoco }) {
 
 async function bootstrap() {
     ticketsDecideBtn.addEventListener('click', submitDecision);
+    btnDrawCards.addEventListener('click', onDrawCards);
     mapData = await fetchMap();
     if (mapData) renderMap(mapData);
     await pollState();
