@@ -30,6 +30,11 @@ final class Response
         return self::json(['error' => 'not_found'], 404);
     }
 
+    public function withHeader(string $name, string $value): self
+    {
+        return new self($this->status, $this->body, [$name => $value] + $this->headers);
+    }
+
     public function send(): void
     {
         http_response_code($this->status);

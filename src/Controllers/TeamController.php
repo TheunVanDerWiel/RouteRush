@@ -11,6 +11,7 @@ use RouteRush\Response;
 final class TeamController
 {
     private const PIN_ALLOCATION_RETRIES = 10;
+    private const PIN_RATE_LIMIT_SECONDS = 5;
 
     public function __construct(private readonly PDO $pdo) {}
 
@@ -151,6 +152,151 @@ final class TeamController
             'is_host'     => $isHost,
             'pin'         => $pin,
         ], 201);
+    }
+
+    public function join(Request $r, string $code, string $teamIdRaw): Response
+    {
+        if (($guard = self::requireJson($r)) !== null) {
+            return $guard;
+        }
+
+        $playerName = is_string($r->body['player_name'] ?? null) ? trim($r->body['player_name']) : '';
+        $pin        = is_string($r->body['pin']         ?? null) ? $r->body['pin']               : '';
+
+        if ($playerName === '' || mb_strlen($playerName) > 50) {
+            return self::error('invalid_payload', 'player_name is required (1-50 chars)', 400);
+        }
+        if (preg_match('/^\d{4}$/', $pin) !== 1) {
+            return self::error('invalid_payload', 'pin must be exactly 4 digits', 400);
+        }
+        $teamId = filter_var($teamIdRaw, FILTER_VALIDATE_INT);
+        if ($teamId === false || $teamId <= 0) {
+            return self::error('not_found', 'Team not found', 404);
+        }
+
+        $ipBin = self::clientIpBinary();
+        if ($ipBin !== null) {
+            $stmt = $this->pdo->prepare(
+                'SELECT TIMESTAMPDIFF(MICROSECOND, last_failed_at, UTC_TIMESTAMP(3)) AS micros_since
+                   FROM pin_failed_attempts WHERE ip = ?'
+            );
+            $stmt->execute([$ipBin]);
+            $row = $stmt->fetch();
+            if ($row !== false && (int) $row['micros_since'] < self::PIN_RATE_LIMIT_SECONDS * 1_000_000) {
+                return self::error('rate_limited', 'Too many failed attempts, slow down', 429)
+                    ->withHeader('Retry-After', (string) self::PIN_RATE_LIMIT_SECONDS);
+            }
+        }
+
+        $code = strtoupper($code);
+        $stmt = $this->pdo->prepare(
+            'SELECT g.id AS game_id, g.status, g.host_player_id,
+                    t.id AS team_id, t.name AS team_name, t.color_index, t.pin_hash
+               FROM games g
+               JOIN game_teams t ON t.game_id = g.id
+              WHERE g.room_code = ? AND t.id = ?'
+        );
+        $stmt->execute([$code, $teamId]);
+        $row = $stmt->fetch();
+        if ($row === false) {
+            return self::error('not_found', 'Team not found in this game', 404);
+        }
+        if ($row['status'] !== 'lobby') {
+            return self::error('game_not_lobby', 'Game is no longer accepting new players', 409);
+        }
+
+        if (!password_verify($pin, $row['pin_hash'])) {
+            if ($ipBin !== null) {
+                $stmt = $this->pdo->prepare(
+                    'INSERT INTO pin_failed_attempts (ip) VALUES (?)
+                     ON DUPLICATE KEY UPDATE last_failed_at = UTC_TIMESTAMP(3)'
+                );
+                $stmt->execute([$ipBin]);
+            }
+            return self::error('wrong_pin', 'Incorrect PIN', 401);
+        }
+
+        $gameId       = (int) $row['game_id'];
+        $colorIndex   = (int) $row['color_index'];
+        $sessionToken = bin2hex(random_bytes(32));
+
+        // Rejoin path: a player with this exact display_name already exists on
+        // the team. PIN matched, so this is the same human reconnecting after
+        // a session loss. Reissue the session token against their existing
+        // player record instead of inserting a duplicate.
+        $stmt = $this->pdo->prepare(
+            'SELECT id FROM game_players WHERE team_id = ? AND display_name = ? LIMIT 1'
+        );
+        $stmt->execute([$teamId, $playerName]);
+        $existing = $stmt->fetch();
+        if ($existing !== false) {
+            $playerId = (int) $existing['id'];
+            $this->pdo->prepare('UPDATE game_players SET session_token = ? WHERE id = ?')
+                ->execute([$sessionToken, $playerId]);
+
+            $_SESSION['player_id']     = $playerId;
+            $_SESSION['session_token'] = $sessionToken;
+
+            return Response::json([
+                'team_id'     => $teamId,
+                'player_id'   => $playerId,
+                'color_index' => $colorIndex,
+            ]);
+        }
+
+        $stmt = $this->pdo->prepare('SELECT COUNT(*) AS n FROM game_players WHERE team_id = ?');
+        $stmt->execute([$teamId]);
+        $existingPlayers = (int) $stmt->fetch()['n'];
+
+        $this->pdo->beginTransaction();
+        try {
+            $insertPlayer = $this->pdo->prepare(
+                'INSERT INTO game_players (team_id, display_name, session_token) VALUES (?, ?, ?)'
+            );
+            $insertPlayer->execute([$teamId, $playerName, $sessionToken]);
+            $playerId = (int) $this->pdo->lastInsertId();
+
+            $event = $this->pdo->prepare(
+                'INSERT INTO game_events (game_id, team_id, player_id, kind, payload_json) VALUES (?, ?, ?, ?, ?)'
+            );
+            $event->execute([
+                $gameId,
+                $teamId,
+                $playerId,
+                'join',
+                json_encode(['team_id' => $teamId, 'player_name' => $playerName], JSON_THROW_ON_ERROR),
+            ]);
+
+            $this->pdo->commit();
+        } catch (\Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        $_SESSION['player_id']     = $playerId;
+        $_SESSION['session_token'] = $sessionToken;
+
+        $response = Response::json([
+            'team_id'     => $teamId,
+            'player_id'   => $playerId,
+            'color_index' => $colorIndex,
+        ]);
+        if ($existingPlayers >= 2) {
+            $response = $response->withHeader('X-Warning', 'team_already_has_two_players');
+        }
+        return $response;
+    }
+
+    private static function clientIpBinary(): ?string
+    {
+        $ip = $_SERVER['REMOTE_ADDR'] ?? null;
+        if (!is_string($ip) || $ip === '') {
+            return null;
+        }
+        $packed = @inet_pton($ip);
+        return $packed === false ? null : $packed;
     }
 
     private static function requireJson(Request $r): ?Response

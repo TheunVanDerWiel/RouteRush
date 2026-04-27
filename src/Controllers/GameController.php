@@ -129,10 +129,13 @@ final class GameController
             'player_count' => (int) $t['player_count'],
         ], $teamRows);
 
-        $endsAt = null;
+        $startedAtIso = null;
+        $endsAtIso    = null;
         if ($game['started_at'] !== null && $game['status'] !== 'lobby') {
-            $startedAtMs = strtotime($game['started_at']) * 1000;
-            $endsAt      = gmdate('Y-m-d\TH:i:s', (int) ($startedAtMs / 1000) + (int) $game['duration_seconds']) . '.000Z';
+            $started      = new \DateTimeImmutable($game['started_at'], new \DateTimeZone('UTC'));
+            $startedAtIso = $started->format('Y-m-d\TH:i:s.v\Z');
+            $endsAtIso    = $started->modify('+' . (int) $game['duration_seconds'] . ' seconds')
+                                    ->format('Y-m-d\TH:i:s.v\Z');
         }
 
         $you = null;
@@ -164,10 +167,210 @@ final class GameController
                 'name' => $game['map_name'],
             ],
             'duration_seconds' => (int) $game['duration_seconds'],
-            'started_at'       => $game['started_at'],
-            'ends_at'          => $endsAt,
+            'started_at'       => $startedAtIso,
+            'ends_at'          => $endsAtIso,
             'teams'            => $teams,
             'you'              => $you,
         ]);
+    }
+
+    public function start(Request $r, string $code): Response
+    {
+        $ct = $r->headers['Content-Type'] ?? $r->headers['content-type'] ?? '';
+        if (!str_contains((string) $ct, 'application/json')) {
+            return self::error('unsupported_media_type', 'Content-Type must be application/json', 415);
+        }
+
+        $playerId = $_SESSION['player_id'] ?? null;
+        if ($playerId === null) {
+            return self::error('not_authenticated', 'Sign in by creating or joining a team first', 401);
+        }
+
+        $code = strtoupper($code);
+        $stmt = $this->pdo->prepare(
+            'SELECT g.id, g.status, g.host_player_id, g.duration_seconds, g.map_id,
+                    m.starting_train_cards, m.min_teams
+               FROM games g
+               JOIN maps  m ON m.id = g.map_id
+              WHERE g.room_code = ?'
+        );
+        $stmt->execute([$code]);
+        $game = $stmt->fetch();
+        if ($game === false) {
+            return self::error('not_found', 'Game not found', 404);
+        }
+        if ((int) $game['host_player_id'] !== (int) $playerId) {
+            return self::error('not_host', 'Only the host can start the game', 403);
+        }
+        if ($game['status'] !== 'lobby') {
+            return self::error('already_started', 'Game has already started', 409);
+        }
+
+        $gameId        = (int) $game['id'];
+        $mapId         = (int) $game['map_id'];
+        $startingCards = (int) $game['starting_train_cards'];
+        $minTeams      = (int) $game['min_teams'];
+        $duration      = (int) $game['duration_seconds'];
+
+        $stmt = $this->pdo->prepare('SELECT id FROM game_teams WHERE game_id = ? ORDER BY joined_at');
+        $stmt->execute([$gameId]);
+        $teamIds = array_map('intval', array_column($stmt->fetchAll(), 'id'));
+        if (count($teamIds) === 0) {
+            return self::error('lobby_empty', 'Cannot start a game with no teams', 409);
+        }
+        if (count($teamIds) < $minTeams) {
+            return self::error(
+                'not_enough_teams',
+                "This map requires at least $minTeams teams (you have " . count($teamIds) . ')',
+                409
+            );
+        }
+
+        $this->pdo->beginTransaction();
+        try {
+            // Initialize the card pool from map_colors. Locomotive count is
+            // already set on games.locomotives_remaining when the game was created.
+            $this->pdo->prepare(
+                'INSERT INTO game_card_pool (game_id, color_id, count)
+                 SELECT ?, id, deck_count FROM map_colors WHERE map_id = ?'
+            )->execute([$gameId, $mapId]);
+
+            // Build an in-memory deck: list of color_ids, with `null` for locomotives.
+            $stmt = $this->pdo->prepare('SELECT color_id, count FROM game_card_pool WHERE game_id = ?');
+            $stmt->execute([$gameId]);
+            $deck = [];
+            foreach ($stmt->fetchAll() as $row) {
+                for ($i = 0; $i < (int) $row['count']; $i++) {
+                    $deck[] = (int) $row['color_id'];
+                }
+            }
+            $stmt = $this->pdo->prepare('SELECT locomotives_remaining FROM games WHERE id = ?');
+            $stmt->execute([$gameId]);
+            $locomotives = (int) $stmt->fetch()['locomotives_remaining'];
+            for ($i = 0; $i < $locomotives; $i++) {
+                $deck[] = null;
+            }
+
+            $totalCardsNeeded = count($teamIds) * $startingCards;
+            if (count($deck) < $totalCardsNeeded) {
+                $this->pdo->rollBack();
+                return self::error('deck_too_small', 'Map deck cannot cover starting hands', 500);
+            }
+
+            shuffle($deck);
+
+            // Hand out cards. hands[teamId] = [color_id => count, '_loco' => N]
+            $hands = [];
+            foreach ($teamIds as $tid) {
+                $hands[$tid] = ['_loco' => 0];
+            }
+            $idx = 0;
+            foreach ($teamIds as $tid) {
+                for ($i = 0; $i < $startingCards; $i++) {
+                    $card = $deck[$idx++];
+                    if ($card === null) {
+                        $hands[$tid]['_loco']++;
+                    } else {
+                        $hands[$tid][$card] = ($hands[$tid][$card] ?? 0) + 1;
+                    }
+                }
+            }
+
+            $insertHand = $this->pdo->prepare(
+                'INSERT INTO game_team_hands (team_id, color_id, count) VALUES (?, ?, ?)'
+            );
+            $updateLoco = $this->pdo->prepare(
+                'UPDATE game_teams SET locomotives_in_hand = ? WHERE id = ?'
+            );
+            $totalLoco       = 0;
+            $dealtPerColor   = [];
+            foreach ($hands as $tid => $hand) {
+                foreach ($hand as $colorId => $count) {
+                    if ($colorId === '_loco' || $count <= 0) {
+                        continue;
+                    }
+                    $insertHand->execute([$tid, $colorId, $count]);
+                    $dealtPerColor[$colorId] = ($dealtPerColor[$colorId] ?? 0) + $count;
+                }
+                $updateLoco->execute([$hand['_loco'], $tid]);
+                $totalLoco += $hand['_loco'];
+            }
+
+            $updatePool = $this->pdo->prepare(
+                'UPDATE game_card_pool SET count = count - ? WHERE game_id = ? AND color_id = ?'
+            );
+            foreach ($dealtPerColor as $colorId => $dealt) {
+                $updatePool->execute([$dealt, $gameId, $colorId]);
+            }
+
+            $this->pdo->prepare(
+                'UPDATE games
+                    SET locomotives_remaining = locomotives_remaining - ?,
+                        deck_counter          = deck_counter - ?
+                  WHERE id = ?'
+            )->execute([$totalLoco, $totalCardsNeeded, $gameId]);
+
+            // Deal tickets: 1 long + 3 regular per team, no duplicates across teams.
+            $stmt = $this->pdo->prepare('SELECT id FROM map_tickets WHERE map_id = ? AND is_long_route = TRUE');
+            $stmt->execute([$mapId]);
+            $longIds = array_map('intval', array_column($stmt->fetchAll(), 'id'));
+
+            $stmt = $this->pdo->prepare('SELECT id FROM map_tickets WHERE map_id = ? AND is_long_route = FALSE');
+            $stmt->execute([$mapId]);
+            $regularIds = array_map('intval', array_column($stmt->fetchAll(), 'id'));
+
+            $teamCount = count($teamIds);
+            if (count($longIds) < $teamCount || count($regularIds) < $teamCount * 3) {
+                $this->pdo->rollBack();
+                return self::error('ticket_pool_too_small', 'Map does not have enough tickets for this many teams', 500);
+            }
+
+            shuffle($longIds);
+            shuffle($regularIds);
+
+            $insertTicket = $this->pdo->prepare(
+                "INSERT INTO game_team_tickets (team_id, ticket_id, status) VALUES (?, ?, 'pending')"
+            );
+            foreach ($teamIds as $tid) {
+                $insertTicket->execute([$tid, array_pop($longIds)]);
+                for ($i = 0; $i < 3; $i++) {
+                    $insertTicket->execute([$tid, array_pop($regularIds)]);
+                }
+            }
+
+            $this->pdo->prepare(
+                "UPDATE games SET status = 'in_progress', started_at = UTC_TIMESTAMP(3) WHERE id = ?"
+            )->execute([$gameId]);
+
+            $stmt = $this->pdo->prepare('SELECT started_at FROM games WHERE id = ?');
+            $stmt->execute([$gameId]);
+            $startedAtRaw = $stmt->fetch()['started_at'];
+
+            $this->pdo->prepare(
+                "INSERT INTO game_events (game_id, kind, payload_json) VALUES (?, 'start', ?)"
+            )->execute([$gameId, json_encode(['team_count' => $teamCount], JSON_THROW_ON_ERROR)]);
+
+            $this->pdo->commit();
+        } catch (\Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        $started      = new \DateTimeImmutable($startedAtRaw, new \DateTimeZone('UTC'));
+        $startedAtIso = $started->format('Y-m-d\TH:i:s.v\Z');
+        $endsAtIso    = $started->modify("+{$duration} seconds")->format('Y-m-d\TH:i:s.v\Z');
+
+        return Response::json([
+            'status'     => 'in_progress',
+            'started_at' => $startedAtIso,
+            'ends_at'    => $endsAtIso,
+        ]);
+    }
+
+    private static function error(string $code, string $message, int $status): Response
+    {
+        return Response::json(['error' => $code, 'message' => $message], $status);
     }
 }

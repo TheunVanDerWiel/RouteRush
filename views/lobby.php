@@ -48,6 +48,32 @@ use RouteRush\View;
         </form>
     </section>
 
+    <section class="card" id="join-team-section">
+        <h2>Join an existing team</h2>
+        <p class="hint">Ask your teammate for the 4-digit PIN they were given.</p>
+        <form id="join-team-form" novalidate>
+            <label>
+                Team
+                <select name="team_id" required>
+                    <option value="">Select a team…</option>
+                </select>
+            </label>
+            <label>
+                Your name
+                <input type="text" name="player_name" maxlength="50" required autocomplete="off">
+            </label>
+            <label>
+                4-digit PIN
+                <input
+                    type="text" name="pin" inputmode="numeric" pattern="\d{4}"
+                    maxlength="4" minlength="4" required autocomplete="off"
+                >
+            </label>
+            <button type="submit">Join team</button>
+            <p class="error" id="join-team-error" role="alert"></p>
+        </form>
+    </section>
+
     <section class="card" id="joined-section" hidden>
         <h2>You're in</h2>
         <p id="joined-summary"></p>
@@ -55,7 +81,16 @@ use RouteRush\View;
             <p class="hint">Share this PIN with your teammate so they can join:</p>
             <p class="team-pin" aria-label="Team PIN"><span id="team-pin"></span></p>
         </div>
-        <p class="hint">Waiting for other teams. The host can start the game when everyone is ready.</p>
+        <div id="host-controls" hidden>
+            <button id="start-game-btn" type="button">Start game</button>
+            <p class="error" id="start-error" role="alert"></p>
+        </div>
+        <p class="hint" id="waiting-hint" hidden>Waiting for the host to start the game.</p>
+    </section>
+
+    <section class="card" id="in-progress-section" hidden>
+        <h2>The game has started!</h2>
+        <p class="hint">In-game UI is coming soon.</p>
     </section>
 </main>
 <script src="/assets/js/lobby.js" type="module"></script>

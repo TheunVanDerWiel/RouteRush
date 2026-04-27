@@ -30,10 +30,10 @@ with an appropriate HTTP status. Common codes:
 | Status | `error` examples                              |
 | ------ | --------------------------------------------- |
 | 400    | `bad_request`, `invalid_payload`              |
-| 401    | `not_authenticated`                           |
+| 401    | `not_authenticated`, `wrong_pin`              |
 | 403    | `forbidden`, `not_host`, `wrong_game`         |
 | 404    | `not_found`                                   |
-| 409    | `pending_tickets`, `already_claimed`, `lobby_full`, `game_not_started`, `game_ended` |
+| 409    | `pending_tickets`, `already_claimed`, `lobby_full`, `lobby_empty`, `not_enough_teams`, `game_not_lobby`, `already_started`, `game_not_started`, `game_ended` |
 | 415    | `unsupported_media_type`                      |
 | 422    | `insufficient_cards`, `no_draw_window`, `not_at_station` |
 | 429    | `rate_limited` (with `Retry-After` header)    |
@@ -123,8 +123,12 @@ Side effects:
 - Deal 1 long-route + 3 regular tickets per team in `status=pending`.
 - Emit `start` event.
 
-**Errors**: `403 not_host`, `409 already_started`, `409 lobby_empty`
-(no teams).
+**Errors**: `401 not_authenticated`, `403 not_host`,
+`409 already_started`, `409 lobby_empty` (no teams),
+`409 not_enough_teams` (fewer teams than `map.min_teams`),
+`500 deck_too_small` / `500 ticket_pool_too_small` (misconfigured map —
+admin needs to add more cards/tickets before this map can support the
+current team count).
 
 ---
 
@@ -178,9 +182,21 @@ Join an existing team. Sets the session cookie.
 { "team_id": 11, "player_id": 102, "color_index": 0 }
 ```
 
-**Errors**: `429 rate_limited` (per-IP failed-PIN limit, 1/5s),
-`401 wrong_pin`, `409 game_not_lobby`. A warning flag may be returned
-in headers when the team already has 2+ players (still allowed per §4).
+This endpoint is **idempotent on `(team_id, player_name)`**: if a
+player with that exact display_name already exists on the team, the
+existing player record is reused — a fresh `session_token` is issued
+and bound to the same `player_id`, no new player row is inserted, and
+no `join` event is emitted. This makes the endpoint safe to call when
+a player loses their session and has to reconnect from the lobby.
+
+**Errors**: `400 invalid_payload`, `404 not_found` (game or team),
+`429 rate_limited` (per-IP failed-PIN limit, 1/5s; sets `Retry-After: 5`),
+`401 wrong_pin`, `409 game_not_lobby`.
+
+When the team already has 2+ players, the request still succeeds but
+the response carries the header `X-Warning: team_already_has_two_players`
+so the UI can surface a "this team is already full" notice without
+blocking the join (per §4).
 
 ---
 

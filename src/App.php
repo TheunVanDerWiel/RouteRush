@@ -41,9 +41,11 @@ final class App
         $this->router->get('/',                 fn() => (new HomeController($pdo))->index());
         $this->router->get('/lobby/{code}',     fn(Request $r, array $p) => (new HomeController($pdo))->lobby($p['code']));
 
-        $this->router->get('/api/maps',                       fn() => (new MapController($pdo))->index());
-        $this->router->post('/api/games',                     fn(Request $r) => (new GameController($pdo))->create($r));
-        $this->router->get('/api/games/{code}',               fn(Request $r, array $p) => (new GameController($pdo))->show($p['code']));
-        $this->router->post('/api/games/{code}/teams',        fn(Request $r, array $p) => (new TeamController($pdo))->create($r, $p['code']));
+        $this->router->get('/api/maps',                              fn() => (new MapController($pdo))->index());
+        $this->router->post('/api/games',                            fn(Request $r) => (new GameController($pdo))->create($r));
+        $this->router->get('/api/games/{code}',                      fn(Request $r, array $p) => (new GameController($pdo))->show($p['code']));
+        $this->router->post('/api/games/{code}/start',               fn(Request $r, array $p) => (new GameController($pdo))->start($r, $p['code']));
+        $this->router->post('/api/games/{code}/teams',               fn(Request $r, array $p) => (new TeamController($pdo))->create($r, $p['code']));
+        $this->router->post('/api/games/{code}/teams/{teamId}/join', fn(Request $r, array $p) => (new TeamController($pdo))->join($r, $p['code'], $p['teamId']));
     }
 }
