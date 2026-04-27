@@ -1035,6 +1035,238 @@ final class GameController
         ]);
     }
 
+    public function trade(Request $r, string $code): Response
+    {
+        $ct = $r->headers['Content-Type'] ?? $r->headers['content-type'] ?? '';
+        if (!str_contains((string) $ct, 'application/json')) {
+            return self::error('unsupported_media_type', 'Content-Type must be application/json', 415);
+        }
+
+        $playerId = $_SESSION['player_id'] ?? null;
+        if ($playerId === null) {
+            return self::error('not_authenticated', 'Sign in by creating or joining a team first', 401);
+        }
+
+        $kind      = $r->body['kind']                          ?? null;
+        $spendRaw  = $r->body['spend']                         ?? null;
+        $spendLoco = filter_var($r->body['spend_locomotives'] ?? 0, FILTER_VALIDATE_INT);
+
+        if ($kind !== 'any3for2' && $kind !== 'same3forLoco') {
+            return self::error('invalid_trade_input', 'kind must be any3for2 or same3forLoco', 422);
+        }
+        if (!is_array($spendRaw) || $spendLoco === false || $spendLoco < 0) {
+            return self::error('invalid_trade_input', 'spend object and spend_locomotives required', 422);
+        }
+
+        $spend = [];
+        foreach ($spendRaw as $key => $val) {
+            $cid = filter_var($key, FILTER_VALIDATE_INT);
+            $cnt = filter_var($val, FILTER_VALIDATE_INT);
+            if ($cid === false || $cid <= 0 || $cnt === false || $cnt < 0) {
+                return self::error('invalid_trade_input', 'spend keys must be color_ids; values non-negative ints', 422);
+            }
+            if ($cnt > 0) {
+                $spend[$cid] = $cnt;
+            }
+        }
+
+        $colorTotal = array_sum($spend);
+        if ($kind === 'any3for2') {
+            if ($colorTotal + $spendLoco !== 3) {
+                return self::error('invalid_trade_input', 'Must spend exactly 3 cards', 422);
+            }
+        } else {
+            if ($spendLoco !== 0 || count($spend) !== 1 || $colorTotal !== 3) {
+                return self::error('invalid_trade_input', 'Must spend exactly 3 cards of one color (no locomotives)', 422);
+            }
+        }
+
+        $code = strtoupper($code);
+
+        $this->pdo->beginTransaction();
+        try {
+            $stmt = $this->pdo->prepare(
+                'SELECT g.id AS game_id, g.status, g.locomotives_remaining,
+                        t.id AS team_id, t.locomotives_in_hand,
+                        (SELECT COUNT(*) FROM game_team_tickets WHERE team_id = t.id AND status = \'pending\') AS pending_tickets
+                   FROM games g
+                   JOIN game_players p ON p.id = ?
+                   JOIN game_teams   t ON t.id = p.team_id AND t.game_id = g.id
+                  WHERE g.room_code = ?
+                    FOR UPDATE'
+            );
+            $stmt->execute([(int) $playerId, $code]);
+            $row = $stmt->fetch();
+            if ($row === false) {
+                $this->pdo->rollBack();
+                return self::error('wrong_game', 'You are not part of this game', 403);
+            }
+            if ($row['status'] !== 'in_progress') {
+                $this->pdo->rollBack();
+                return self::error('game_not_in_progress', 'Game is not in progress', 409);
+            }
+            if ((int) $row['pending_tickets'] > 0) {
+                $this->pdo->rollBack();
+                return self::error('pending_tickets', 'Decide on pending tickets before trading', 409);
+            }
+
+            $gameId     = (int) $row['game_id'];
+            $teamId     = (int) $row['team_id'];
+            $teamLoco   = (int) $row['locomotives_in_hand'];
+            $locoInPool = (int) $row['locomotives_remaining'];
+
+            // Verify hand
+            if ($spendLoco > $teamLoco) {
+                $this->pdo->rollBack();
+                return self::error('insufficient_cards', 'Not enough locomotives in hand', 422);
+            }
+            foreach ($spend as $cid => $cnt) {
+                $stmt = $this->pdo->prepare(
+                    'SELECT count FROM game_team_hands WHERE team_id = ? AND color_id = ?'
+                );
+                $stmt->execute([$teamId, $cid]);
+                $h = $stmt->fetch();
+                if ($h === false || (int) $h['count'] < $cnt) {
+                    $this->pdo->rollBack();
+                    return self::error('insufficient_cards', "Not enough cards of color $cid in hand", 422);
+                }
+            }
+
+            // For same3forLoco we need a locomotive in pool BEFORE applying.
+            if ($kind === 'same3forLoco' && $locoInPool <= 0) {
+                $this->pdo->rollBack();
+                return self::error('no_locomotives_left', 'No locomotives left in the pool', 422);
+            }
+
+            // Return spent cards to pool.
+            if ($spendLoco > 0) {
+                $this->pdo->prepare(
+                    'UPDATE game_teams SET locomotives_in_hand = locomotives_in_hand - ? WHERE id = ?'
+                )->execute([$spendLoco, $teamId]);
+                $this->pdo->prepare(
+                    'UPDATE games SET locomotives_remaining = locomotives_remaining + ?,
+                                      deck_counter          = deck_counter + ?
+                              WHERE id = ?'
+                )->execute([$spendLoco, $spendLoco, $gameId]);
+                $locoInPool += $spendLoco;
+            }
+            foreach ($spend as $cid => $cnt) {
+                $this->pdo->prepare(
+                    'UPDATE game_team_hands SET count = count - ? WHERE team_id = ? AND color_id = ?'
+                )->execute([$cnt, $teamId, $cid]);
+                $this->pdo->prepare(
+                    'INSERT INTO game_card_pool (game_id, color_id, count) VALUES (?, ?, ?)
+                     ON DUPLICATE KEY UPDATE count = count + VALUES(count)'
+                )->execute([$gameId, $cid, $cnt]);
+                $this->pdo->prepare(
+                    'UPDATE games SET deck_counter = deck_counter + ? WHERE id = ?'
+                )->execute([$cnt, $gameId]);
+            }
+
+            $receivedColors = [];
+            $receivedLoco   = 0;
+
+            if ($kind === 'any3for2') {
+                // Draw 2 from current pool (which includes the 3 just returned).
+                $stmt = $this->pdo->prepare(
+                    'SELECT color_id, count FROM game_card_pool WHERE game_id = ?'
+                );
+                $stmt->execute([$gameId]);
+                $weights = [];
+                foreach ($stmt->fetchAll() as $p) {
+                    $cnt = (int) $p['count'];
+                    if ($cnt > 0) {
+                        $weights[] = ['type' => (int) $p['color_id'], 'w' => $cnt];
+                    }
+                }
+                if ($locoInPool > 0) {
+                    $weights[] = ['type' => null, 'w' => $locoInPool];
+                }
+                $total = array_sum(array_column($weights, 'w'));
+
+                $colorCounts = [];
+                for ($i = 0; $i < 2 && $total > 0; $i++) {
+                    $pick = random_int(1, $total);
+                    $cum  = 0;
+                    foreach ($weights as $idx => $w) {
+                        $cum += $w['w'];
+                        if ($cum >= $pick) {
+                            if ($w['type'] === null) {
+                                $receivedLoco++;
+                            } else {
+                                $receivedColors[] = $w['type'];
+                                $colorCounts[$w['type']] = ($colorCounts[$w['type']] ?? 0) + 1;
+                            }
+                            $weights[$idx]['w']--;
+                            $total--;
+                            break;
+                        }
+                    }
+                }
+                $totalReceived = count($receivedColors) + $receivedLoco;
+
+                foreach ($colorCounts as $cid => $cnt) {
+                    $this->pdo->prepare(
+                        'UPDATE game_card_pool SET count = count - ? WHERE game_id = ? AND color_id = ?'
+                    )->execute([$cnt, $gameId, $cid]);
+                    $this->pdo->prepare(
+                        'INSERT INTO game_team_hands (team_id, color_id, count) VALUES (?, ?, ?)
+                         ON DUPLICATE KEY UPDATE count = count + VALUES(count)'
+                    )->execute([$teamId, $cid, $cnt]);
+                }
+                if ($receivedLoco > 0) {
+                    $this->pdo->prepare(
+                        'UPDATE games SET locomotives_remaining = locomotives_remaining - ? WHERE id = ?'
+                    )->execute([$receivedLoco, $gameId]);
+                    $this->pdo->prepare(
+                        'UPDATE game_teams SET locomotives_in_hand = locomotives_in_hand + ? WHERE id = ?'
+                    )->execute([$receivedLoco, $teamId]);
+                }
+                if ($totalReceived > 0) {
+                    $this->pdo->prepare(
+                        'UPDATE games SET deck_counter = deck_counter - ? WHERE id = ?'
+                    )->execute([$totalReceived, $gameId]);
+                }
+            } else {
+                // same3forLoco: hand out 1 locomotive.
+                $receivedLoco = 1;
+                $this->pdo->prepare(
+                    'UPDATE games SET locomotives_remaining = locomotives_remaining - 1,
+                                      deck_counter          = deck_counter - 1
+                              WHERE id = ?'
+                )->execute([$gameId]);
+                $this->pdo->prepare(
+                    'UPDATE game_teams SET locomotives_in_hand = locomotives_in_hand + 1 WHERE id = ?'
+                )->execute([$teamId]);
+            }
+
+            $payload = json_encode([
+                'kind'                 => $kind,
+                'spend'                => (object) $spend,
+                'spend_locomotives'    => $spendLoco,
+                'received_colors'      => $receivedColors,
+                'received_locomotives' => $receivedLoco,
+            ], JSON_THROW_ON_ERROR);
+            $this->pdo->prepare(
+                "INSERT INTO game_events (game_id, team_id, kind, payload_json)
+                 VALUES (?, ?, 'trade', ?)"
+            )->execute([$gameId, $teamId, $payload]);
+
+            $this->pdo->commit();
+        } catch (\Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return Response::json([
+            'ok'                   => true,
+            'received_colors'      => $receivedColors,
+            'received_locomotives' => $receivedLoco,
+        ]);
+    }
+
     public function decideTickets(Request $r, string $code): Response
     {
         $ct = $r->headers['Content-Type'] ?? $r->headers['content-type'] ?? '';
@@ -1146,7 +1378,7 @@ final class GameController
             ], JSON_THROW_ON_ERROR);
             $this->pdo->prepare(
                 "INSERT INTO game_events (game_id, team_id, kind, payload_json)
-                 VALUES (?, ?, 'tickets_decide', ?)"
+                 VALUES (?, ?, 'keep_tickets', ?)"
             )->execute([$gameId, $teamId, $payload]);
 
             $this->pdo->commit();

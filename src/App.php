@@ -51,6 +51,7 @@ final class App
         $this->router->post('/api/games/{code}/claim',               fn(Request $r, array $p) => (new GameController($pdo))->claim($r, $p['code']));
         $this->router->post('/api/games/{code}/draw/cards',          fn(Request $r, array $p) => (new GameController($pdo))->drawCards($p['code']));
         $this->router->post('/api/games/{code}/draw/tickets',        fn(Request $r, array $p) => (new GameController($pdo))->drawTickets($p['code']));
+        $this->router->post('/api/games/{code}/trade',               fn(Request $r, array $p) => (new GameController($pdo))->trade($r, $p['code']));
         $this->router->post('/api/games/{code}/tickets/decide',      fn(Request $r, array $p) => (new GameController($pdo))->decideTickets($r, $p['code']));
         $this->router->post('/api/games/{code}/teams',               fn(Request $r, array $p) => (new TeamController($pdo))->create($r, $p['code']));
         $this->router->post('/api/games/{code}/teams/{teamId}/join', fn(Request $r, array $p) => (new TeamController($pdo))->join($r, $p['code'], $p['teamId']));

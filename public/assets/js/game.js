@@ -493,11 +493,26 @@ function updateActionButtons(state) {
     const team       = state.team || {};
     const windows    = team.windows_available || 0;
     const deck       = (state.game && state.game.deck_remaining) || 0;
+    const totalHand  = totalHandCards(team);
+    const maxColor   = maxColorInHand(team);
     btnDrawCards.disabled   = blocked || windows <= 0 || deck <= 0;
     btnDrawTickets.disabled = blocked || windows <= 0;
-    // Trades — slice 4
-    btnTrade32.disabled    = true;
-    btnTrade3Loco.disabled = true;
+    btnTrade32.disabled     = blocked || totalHand < 3;
+    btnTrade3Loco.disabled  = blocked || maxColor < 3 || (state.game.locomotives_remaining || 0) <= 0;
+}
+
+function totalHandCards(team) {
+    const hand = team.hand || {};
+    let n = team.locomotives_in_hand || 0;
+    for (const k of Object.keys(hand)) n += hand[k] || 0;
+    return n;
+}
+
+function maxColorInHand(team) {
+    const hand = team.hand || {};
+    let m = 0;
+    for (const k of Object.keys(hand)) m = Math.max(m, hand[k] || 0);
+    return m;
 }
 
 function hasPendingTickets(state) {
@@ -639,6 +654,225 @@ async function submitDecision() {
     }
     const next = await fetchState();
     if (next) renderState(next);
+}
+
+async function onTrade(kind) {
+    if (hasPendingTickets(lastState)) {
+        showTicketsReminder('Decide on your tickets before trading.');
+        return;
+    }
+    const fresh = await fetchState();
+    if (!fresh) return;
+    renderState(fresh);
+    if (fresh.game.status !== 'in_progress') {
+        window.alert('Game is not in progress.');
+        return;
+    }
+    if (hasPendingTickets(fresh)) {
+        showTicketsReminder('Decide on your tickets before trading.');
+        return;
+    }
+    const choice = await openTradeDialog(kind, fresh);
+    if (!choice) return;
+    const res = await fetch(`/api/games/${encodeURIComponent(code)}/trade`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            kind,
+            spend: choice.spend,
+            spend_locomotives: choice.spend_locomotives,
+        }),
+    });
+    let data = null;
+    try { data = await res.json(); } catch { /* ignore */ }
+    if (!res.ok) {
+        window.alert((data && data.message) || 'Could not trade.');
+        const next = await fetchState();
+        if (next) renderState(next);
+        return;
+    }
+    const next = await fetchState();
+    if (next) renderState(next);
+    showDrewDialog(data.received_colors || [], data.received_locomotives || 0);
+}
+
+function openTradeDialog(kind, state) {
+    return new Promise((resolve) => {
+        const team = state.team || {};
+        const hand = team.hand || {};
+        const haveLoco = team.locomotives_in_hand || 0;
+        const colors = (mapData ? mapData.colors : []).map((c) => ({
+            id: c.id,
+            name: c.display_name,
+            hex: /^#[0-9a-fA-F]{6}$/.test(c.hex) ? c.hex : '#888',
+            have: hand[String(c.id)] || 0,
+        }));
+
+        // chosen[color_id] = count, plus '_loco' for locomotives
+        const chosen = {};
+        for (const c of colors) chosen[c.id] = 0;
+        let chosenLoco = 0;
+
+        const dlg = document.createElement('dialog');
+        dlg.className = 'claim-dialog';
+
+        const form = document.createElement('form');
+        form.method = 'dialog';
+
+        const title = document.createElement('h3');
+        title.className = 'claim-title';
+        title.textContent = kind === 'any3for2'
+            ? 'Trade 3 cards for 2 random'
+            : 'Trade 3 same-color cards for 1 locomotive';
+        form.appendChild(title);
+
+        const hint = document.createElement('p');
+        hint.className = 'claim-totals';
+        hint.textContent = kind === 'any3for2'
+            ? 'Pick any 3 cards (locomotives allowed).'
+            : 'Pick 3 cards of the same color (no locomotives).';
+        form.appendChild(hint);
+
+        const list = document.createElement('div');
+        list.className = 'trade-list';
+        form.appendChild(list);
+
+        const totals = document.createElement('p');
+        totals.className = 'claim-totals';
+        form.appendChild(totals);
+
+        const error = document.createElement('p');
+        error.className = 'error';
+        form.appendChild(error);
+
+        const menu = document.createElement('div');
+        menu.className = 'claim-menu';
+        const cancel = document.createElement('button');
+        cancel.type = 'button';
+        cancel.className = 'claim-cancel';
+        cancel.textContent = 'Cancel';
+        const confirm = document.createElement('button');
+        confirm.type = 'button';
+        confirm.className = 'claim-confirm';
+        confirm.textContent = 'Trade';
+        menu.append(cancel, confirm);
+        form.appendChild(menu);
+
+        const renderRows = () => {
+            list.replaceChildren();
+            for (const c of colors) {
+                if (c.have <= 0) continue;
+                list.appendChild(stepperRow(c.name, c.hex, c.have, () => chosen[c.id], (delta) => {
+                    chosen[c.id] = clamp(chosen[c.id] + delta, 0, c.have);
+                    update();
+                }));
+            }
+            if (kind === 'any3for2' && haveLoco > 0) {
+                list.appendChild(stepperRow('Locomotive', null, haveLoco, () => chosenLoco, (delta) => {
+                    chosenLoco = clamp(chosenLoco + delta, 0, haveLoco);
+                    update();
+                }));
+            }
+        };
+
+        const update = () => {
+            for (const child of list.children) {
+                const sync = child._sync;
+                if (sync) sync();
+            }
+            const colorsPicked = Object.keys(chosen).reduce((s, k) => s + chosen[k], 0);
+            const total = colorsPicked + chosenLoco;
+            totals.textContent = `Picked ${total} of 3.`;
+            let ok = total === 3;
+            if (kind === 'same3forLoco') {
+                const distinct = Object.values(chosen).filter((v) => v > 0).length;
+                if (chosenLoco > 0 || distinct !== 1 || colorsPicked !== 3) ok = false;
+                error.textContent = (chosenLoco > 0)
+                    ? 'No locomotives in this trade.'
+                    : (total === 3 && distinct !== 1)
+                        ? 'All 3 must be the same color.'
+                        : '';
+            } else {
+                error.textContent = '';
+            }
+            confirm.disabled = !ok;
+        };
+
+        renderRows();
+        update();
+
+        cancel.addEventListener('click', () => dlg.close('cancel'));
+        confirm.addEventListener('click', () => dlg.close('confirm'));
+
+        dlg.appendChild(form);
+        document.body.appendChild(dlg);
+
+        dlg.addEventListener('close', () => {
+            const value = dlg.returnValue;
+            dlg.remove();
+            if (value !== 'confirm') {
+                resolve(null);
+                return;
+            }
+            const spend = {};
+            for (const k of Object.keys(chosen)) {
+                if (chosen[k] > 0) spend[k] = chosen[k];
+            }
+            resolve({ spend, spend_locomotives: chosenLoco });
+        });
+
+        dlg.showModal();
+    });
+}
+
+function clamp(n, lo, hi) {
+    return Math.min(hi, Math.max(lo, n));
+}
+
+function stepperRow(label, hex, have, getValue, onDelta) {
+    const row = document.createElement('div');
+    row.className = 'claim-stepper-row';
+
+    const left = document.createElement('span');
+    left.style.display = 'inline-flex';
+    left.style.alignItems = 'center';
+    left.style.gap = '8px';
+    if (hex !== null) {
+        const swatch = document.createElement('span');
+        swatch.className = 'claim-swatch';
+        swatch.style.background = hex;
+        left.appendChild(swatch);
+    }
+    const name = document.createElement('span');
+    name.textContent = `${label} (have ${have})`;
+    left.appendChild(name);
+    row.appendChild(left);
+
+    const stepper = document.createElement('div');
+    stepper.className = 'claim-stepper';
+    const dec = document.createElement('button');
+    dec.type = 'button';
+    dec.className = 'step-btn';
+    dec.textContent = '\u2212';
+    const out = document.createElement('output');
+    out.className = 'step-out mono';
+    const inc = document.createElement('button');
+    inc.type = 'button';
+    inc.className = 'step-btn';
+    inc.textContent = '+';
+    stepper.append(dec, out, inc);
+    row.appendChild(stepper);
+
+    dec.addEventListener('click', () => onDelta(-1));
+    inc.addEventListener('click', () => onDelta(+1));
+
+    row._sync = () => {
+        const v = getValue();
+        out.textContent = String(v);
+        dec.disabled = v <= 0;
+        inc.disabled = v >= have;
+    };
+    return row;
 }
 
 async function onDrawTickets() {
@@ -977,6 +1211,8 @@ async function bootstrap() {
     ticketsDecideBtn.addEventListener('click', submitDecision);
     btnDrawCards.addEventListener('click', onDrawCards);
     btnDrawTickets.addEventListener('click', onDrawTickets);
+    btnTrade32.addEventListener('click', () => onTrade('any3for2'));
+    btnTrade3Loco.addEventListener('click', () => onTrade('same3forLoco'));
     mapData = await fetchMap();
     if (mapData) renderMap(mapData);
     await pollState();

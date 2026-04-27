@@ -398,6 +398,12 @@ button:disabled {
     font-size: 1.05rem;
 }
 
+.trade-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
 .claim-totals {
     margin: 0;
     color: var(--ink-soft);
