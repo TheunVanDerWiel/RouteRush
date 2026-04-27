@@ -533,7 +533,111 @@ button:disabled {
     border-color: var(--accent);
 }
 
+.ticket-row.empty {
+    color: var(--ink-soft);
+    justify-content: center;
+}
+
 .ticket-route { font-weight: 600; }
+
+.tickets-pending {
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+    background: rgba(29, 53, 87, 0.04);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.tickets-pending[hidden] {
+    display: none;
+}
+
+.tickets-pending .hint {
+    margin: 0;
+}
+
+.tickets-pending .ticket-row {
+    background: var(--surface);
+    align-items: stretch;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.ticket-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.ticket-toggle {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.ticket-toggle button {
+    background: transparent;
+    color: var(--ink-soft);
+    border: none;
+    border-radius: 0;
+    padding: 6px 10px;
+    min-height: 36px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.ticket-toggle button + button {
+    border-left: 1px solid var(--border);
+}
+
+.ticket-toggle button.active {
+    background: var(--accent);
+    color: var(--accent-ink);
+}
+
+#tickets-decide-btn {
+    align-self: flex-end;
+}
+
+/* Pending-tickets reminder dialog */
+
+.tickets-reminder-dialog {
+    border: none;
+    border-radius: var(--radius);
+    padding: 20px;
+    max-width: 360px;
+    width: calc(100% - 32px);
+    color: var(--ink);
+    background: var(--surface);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+
+.tickets-reminder-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.4);
+}
+
+.tickets-reminder-dialog h3 {
+    margin: 0 0 8px;
+    font-size: 1.15rem;
+}
+
+.tickets-reminder-dialog p {
+    margin: 0 0 16px;
+    color: var(--ink-soft);
+}
+
+.tickets-reminder-dialog .menu {
+    display: flex;
+    justify-content: flex-end;
+}
 
 .badge {
     display: inline-block;

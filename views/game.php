@@ -56,19 +56,18 @@ use RouteRush\View;
 
     <section class="card tickets-card">
         <h2>Your tickets</h2>
-        <ul class="tickets-list">
-            <li class="ticket-row placeholder-row">
-                <span class="ticket-route">Centraal → Uithof</span>
-                <span class="ticket-points mono">8 pts</span>
-            </li>
-            <li class="ticket-row placeholder-row">
-                <span class="ticket-route">Overvecht → Lunetten</span>
-                <span class="ticket-points mono">6 pts</span>
-            </li>
-            <li class="ticket-row placeholder-row long">
-                <span class="ticket-route">Vleuten → Nieuwegein <span class="badge">long</span></span>
-                <span class="ticket-points mono">12 pts</span>
-            </li>
+        <div class="tickets-pending" id="tickets-pending" hidden>
+            <p class="hint">
+                Pick which to keep
+                (at least <span id="tickets-min-keep" class="mono">1</span>),
+                then confirm:
+            </p>
+            <ul class="tickets-list" id="tickets-pending-list"></ul>
+            <p class="error" id="tickets-decide-error"></p>
+            <button type="button" id="tickets-decide-btn">Confirm choices</button>
+        </div>
+        <ul class="tickets-list" id="tickets-kept">
+            <li class="ticket-row placeholder-row empty" id="tickets-empty">No tickets yet.</li>
         </ul>
     </section>
 

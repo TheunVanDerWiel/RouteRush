@@ -3,6 +3,13 @@ const countdownEl = document.getElementById('countdown');
 const deckRemainingEl = document.getElementById('deck-remaining');
 const handEl = document.getElementById('hand');
 const mapFrameEl = document.getElementById('map-frame');
+const ticketsKeptEl = document.getElementById('tickets-kept');
+const ticketsEmptyEl = document.getElementById('tickets-empty');
+const ticketsPendingEl = document.getElementById('tickets-pending');
+const ticketsPendingListEl = document.getElementById('tickets-pending-list');
+const ticketsMinKeepEl = document.getElementById('tickets-min-keep');
+const ticketsDecideBtn = document.getElementById('tickets-decide-btn');
+const ticketsDecideErrorEl = document.getElementById('tickets-decide-error');
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -27,6 +34,9 @@ const TEAM_COLORS = (() => {
 let endsAtMs = null;
 let mapData = null;
 let lastState = null;
+let pendingChoices = new Map();   // ticket_id -> 'keep' | 'discard'
+let lastPendingKey = '';          // signature of last seen pending set; triggers reminder on change
+let reminderOpen = false;
 
 async function fetchMap() {
     const res = await fetch(`/api/games/${encodeURIComponent(code)}/map`, {
@@ -452,7 +462,176 @@ function renderState(state) {
     }
     deckRemainingEl.textContent = String(state.game.deck_remaining);
     renderHand(state);
+    renderTickets(state);
     applyClaims(state.claims || []);
+}
+
+function hasPendingTickets(state) {
+    return !!(state && state.team && (state.team.pending_tickets || []).length > 0);
+}
+
+function stopName(stopId) {
+    if (!mapData) return `#${stopId}`;
+    const s = mapData.stops.find((x) => x.id === stopId);
+    return s ? s.display_name : `#${stopId}`;
+}
+
+function renderTickets(state) {
+    const team = state.team || {};
+    const kept = team.tickets || [];
+    const pending = team.pending_tickets || [];
+
+    ticketsKeptEl.replaceChildren();
+    if (kept.length === 0) {
+        ticketsKeptEl.appendChild(ticketsEmptyEl);
+    } else {
+        for (const t of kept) {
+            ticketsKeptEl.appendChild(renderTicketRow(t, false));
+        }
+    }
+
+    const pendingKey = pending.map((t) => t.id).sort((a, b) => a - b).join(',');
+    if (pendingKey !== lastPendingKey) {
+        // New batch (or none): reset choices; default to discard.
+        pendingChoices = new Map();
+        for (const t of pending) pendingChoices.set(t.id, 'discard');
+        lastPendingKey = pendingKey;
+        if (pending.length > 0 && !reminderOpen) {
+            showTicketsReminder('You have new tickets to decide. Pick which to keep, then confirm.');
+        }
+    }
+
+    if (pending.length === 0) {
+        ticketsPendingEl.hidden = true;
+        ticketsDecideErrorEl.textContent = '';
+        return;
+    }
+
+    ticketsPendingEl.hidden = false;
+    const isStarting = kept.length === 0;
+    const minKeep = isStarting ? 2 : 1;
+    ticketsMinKeepEl.textContent = String(minKeep);
+
+    ticketsPendingListEl.replaceChildren();
+    for (const t of pending) {
+        ticketsPendingListEl.appendChild(renderTicketRow(t, true));
+    }
+    updateDecideButton(minKeep);
+}
+
+function renderTicketRow(t, isPending) {
+    const li = document.createElement('li');
+    li.className = 'ticket-row' + (t.is_long_route ? ' long' : '');
+
+    const info = document.createElement('div');
+    info.className = 'ticket-info';
+    const route = document.createElement('span');
+    route.className = 'ticket-route';
+    route.textContent = `${stopName(t.from_stop_id)} → ${stopName(t.to_stop_id)}`;
+    if (t.is_long_route) {
+        const badge = document.createElement('span');
+        badge.className = 'badge';
+        badge.textContent = 'long';
+        route.append(' ', badge);
+    }
+    const points = document.createElement('span');
+    points.className = 'ticket-points mono';
+    points.textContent = `${t.points} pts`;
+    info.append(route, points);
+    li.appendChild(info);
+
+    if (isPending) {
+        const toggle = document.createElement('div');
+        toggle.className = 'ticket-toggle';
+        const keepBtn = document.createElement('button');
+        keepBtn.type = 'button';
+        keepBtn.textContent = 'Keep';
+        const discardBtn = document.createElement('button');
+        discardBtn.type = 'button';
+        discardBtn.textContent = 'Discard';
+        const sync = () => {
+            const choice = pendingChoices.get(t.id) || 'discard';
+            keepBtn.classList.toggle('active', choice === 'keep');
+            discardBtn.classList.toggle('active', choice === 'discard');
+        };
+        keepBtn.addEventListener('click', () => {
+            pendingChoices.set(t.id, 'keep');
+            sync();
+            updateDecideButton();
+        });
+        discardBtn.addEventListener('click', () => {
+            pendingChoices.set(t.id, 'discard');
+            sync();
+            updateDecideButton();
+        });
+        toggle.append(keepBtn, discardBtn);
+        li.appendChild(toggle);
+        sync();
+    }
+    return li;
+}
+
+function updateDecideButton(minKeepArg) {
+    const minKeep = minKeepArg !== undefined
+        ? minKeepArg
+        : parseInt(ticketsMinKeepEl.textContent, 10) || 1;
+    let kept = 0;
+    for (const v of pendingChoices.values()) if (v === 'keep') kept++;
+    ticketsDecideBtn.disabled = kept < minKeep;
+    if (kept < minKeep) {
+        ticketsDecideErrorEl.textContent = `Keep at least ${minKeep} ticket${minKeep > 1 ? 's' : ''}.`;
+    } else {
+        ticketsDecideErrorEl.textContent = '';
+    }
+}
+
+async function submitDecision() {
+    const keepIds = [];
+    for (const [id, choice] of pendingChoices) {
+        if (choice === 'keep') keepIds.push(id);
+    }
+    ticketsDecideBtn.disabled = true;
+    const res = await fetch(`/api/games/${encodeURIComponent(code)}/tickets/decide`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keep_ids: keepIds }),
+    });
+    let data = null;
+    try { data = await res.json(); } catch { /* ignore */ }
+    if (!res.ok) {
+        ticketsDecideErrorEl.textContent = (data && data.message) || 'Could not save choice.';
+        ticketsDecideBtn.disabled = false;
+        return;
+    }
+    const next = await fetchState();
+    if (next) renderState(next);
+}
+
+function showTicketsReminder(message) {
+    if (reminderOpen) return;
+    reminderOpen = true;
+    const dlg = document.createElement('dialog');
+    dlg.className = 'tickets-reminder-dialog';
+
+    const h = document.createElement('h3');
+    h.textContent = 'Decide on your tickets';
+    const p = document.createElement('p');
+    p.textContent = message;
+    const menu = document.createElement('div');
+    menu.className = 'menu';
+    const ok = document.createElement('button');
+    ok.type = 'button';
+    ok.textContent = 'OK';
+    ok.addEventListener('click', () => dlg.close());
+    menu.appendChild(ok);
+
+    dlg.append(h, p, menu);
+    dlg.addEventListener('close', () => {
+        dlg.remove();
+        reminderOpen = false;
+    });
+    document.body.appendChild(dlg);
+    dlg.showModal();
 }
 
 function applyClaims(claims) {
@@ -493,11 +672,19 @@ async function pollState() {
 
 async function onRouteClick(route) {
     if (!mapData) return;
+    if (hasPendingTickets(lastState)) {
+        showTicketsReminder('Decide on your tickets before claiming a route.');
+        return;
+    }
     const fresh = await fetchState();
     if (!fresh) return;
     renderState(fresh);
     if (fresh.game.status !== 'in_progress') {
         window.alert('Game is not in progress.');
+        return;
+    }
+    if (hasPendingTickets(fresh)) {
+        showTicketsReminder('Decide on your tickets before claiming a route.');
         return;
     }
     if ((fresh.claims || []).some((c) => c.route_id === route.id)) {
@@ -652,6 +839,7 @@ function openClaimDialog({ route, color, haveColor, haveLoco }) {
 }
 
 async function bootstrap() {
+    ticketsDecideBtn.addEventListener('click', submitDecision);
     mapData = await fetchMap();
     if (mapData) renderMap(mapData);
     await pollState();

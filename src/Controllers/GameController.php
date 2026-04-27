@@ -500,6 +500,32 @@ final class GameController
             'team_color_index' => (int) $c['color_index'],
         ], $stmt->fetchAll());
 
+        $stmt = $this->pdo->prepare(
+            "SELECT mt.id, mt.from_stop_id, mt.to_stop_id, mt.points, mt.is_long_route, gtt.status
+               FROM game_team_tickets gtt
+               JOIN map_tickets       mt ON mt.id = gtt.ticket_id
+              WHERE gtt.team_id = ? AND gtt.status IN ('pending', 'kept')
+           ORDER BY gtt.id"
+        );
+        $stmt->execute([$teamId]);
+        $tickets = [];
+        $pending = [];
+        foreach ($stmt->fetchAll() as $t) {
+            $entry = [
+                'id'            => (int) $t['id'],
+                'from_stop_id'  => (int) $t['from_stop_id'],
+                'to_stop_id'    => (int) $t['to_stop_id'],
+                'points'        => (int) $t['points'],
+                'is_long_route' => (bool) $t['is_long_route'],
+            ];
+            if ($t['status'] === 'pending') {
+                $pending[] = $entry;
+            } else {
+                $entry['status'] = 'kept';
+                $tickets[] = $entry;
+            }
+        }
+
         return Response::json([
             'mode' => 'snapshot',
             'game' => [
@@ -512,6 +538,8 @@ final class GameController
                 'id'                  => $teamId,
                 'hand'                => (object) $hand,
                 'locomotives_in_hand' => $locoInHand,
+                'tickets'             => $tickets,
+                'pending_tickets'     => $pending,
             ],
             'claims' => $claims,
         ]);
@@ -723,6 +751,131 @@ final class GameController
                 'team_id'  => $teamId,
             ],
         ]);
+    }
+
+    public function decideTickets(Request $r, string $code): Response
+    {
+        $ct = $r->headers['Content-Type'] ?? $r->headers['content-type'] ?? '';
+        if (!str_contains((string) $ct, 'application/json')) {
+            return self::error('unsupported_media_type', 'Content-Type must be application/json', 415);
+        }
+
+        $playerId = $_SESSION['player_id'] ?? null;
+        if ($playerId === null) {
+            return self::error('not_authenticated', 'Sign in by creating or joining a team first', 401);
+        }
+
+        $keepRaw = $r->body['keep_ids'] ?? null;
+        if (!is_array($keepRaw)) {
+            return self::error('invalid_payload', 'keep_ids must be an array of ticket ids', 400);
+        }
+        $keepIds = [];
+        foreach ($keepRaw as $v) {
+            $id = filter_var($v, FILTER_VALIDATE_INT);
+            if ($id === false || $id <= 0) {
+                return self::error('invalid_payload', 'keep_ids entries must be positive integers', 400);
+            }
+            $keepIds[$id] = true;
+        }
+
+        $code = strtoupper($code);
+
+        $this->pdo->beginTransaction();
+        try {
+            $stmt = $this->pdo->prepare(
+                'SELECT g.id AS game_id, g.status, t.id AS team_id
+                   FROM games g
+                   JOIN game_players p ON p.id = ?
+                   JOIN game_teams   t ON t.id = p.team_id AND t.game_id = g.id
+                  WHERE g.room_code = ?
+                    FOR UPDATE'
+            );
+            $stmt->execute([(int) $playerId, $code]);
+            $row = $stmt->fetch();
+            if ($row === false) {
+                $this->pdo->rollBack();
+                return self::error('wrong_game', 'You are not part of this game', 403);
+            }
+            if ($row['status'] !== 'in_progress') {
+                $this->pdo->rollBack();
+                return self::error('game_not_in_progress', 'Game is not in progress', 409);
+            }
+
+            $gameId = (int) $row['game_id'];
+            $teamId = (int) $row['team_id'];
+
+            $stmt = $this->pdo->prepare(
+                "SELECT ticket_id FROM game_team_tickets WHERE team_id = ? AND status = 'pending' FOR UPDATE"
+            );
+            $stmt->execute([$teamId]);
+            $pendingIds = array_map('intval', array_column($stmt->fetchAll(), 'ticket_id'));
+            if (empty($pendingIds)) {
+                $this->pdo->rollBack();
+                return self::error('no_pending_tickets', 'No pending tickets to decide', 409);
+            }
+
+            $pendingSet = array_flip($pendingIds);
+            foreach (array_keys($keepIds) as $id) {
+                if (!isset($pendingSet[$id])) {
+                    $this->pdo->rollBack();
+                    return self::error('unknown_ticket', "Ticket $id is not pending for your team", 400);
+                }
+            }
+
+            $stmt = $this->pdo->prepare(
+                "SELECT 1 FROM game_team_tickets WHERE team_id = ? AND status = 'kept' LIMIT 1"
+            );
+            $stmt->execute([$teamId]);
+            $isStarting = $stmt->fetch() === false;
+            $minKeep    = $isStarting ? 2 : 1;
+
+            $keepCount = count($keepIds);
+            if ($keepCount < $minKeep) {
+                $this->pdo->rollBack();
+                $errCode = $isStarting ? 'must_keep_two' : 'must_keep_one';
+                return self::error($errCode, "Must keep at least $minKeep ticket(s)", 422);
+            }
+
+            $keepStmt = $this->pdo->prepare(
+                "UPDATE game_team_tickets
+                    SET status = 'kept', decided_at = UTC_TIMESTAMP(3)
+                  WHERE ticket_id = ? AND team_id = ? AND status = 'pending'"
+            );
+            $discardStmt = $this->pdo->prepare(
+                "UPDATE game_team_tickets
+                    SET status = 'discarded', decided_at = UTC_TIMESTAMP(3)
+                  WHERE ticket_id = ? AND team_id = ? AND status = 'pending'"
+            );
+            $keptList = [];
+            $discardedList = [];
+            foreach ($pendingIds as $id) {
+                if (isset($keepIds[$id])) {
+                    $keepStmt->execute([$id, $teamId]);
+                    $keptList[] = $id;
+                } else {
+                    $discardStmt->execute([$id, $teamId]);
+                    $discardedList[] = $id;
+                }
+            }
+
+            $payload = json_encode([
+                'kept'      => $keptList,
+                'discarded' => $discardedList,
+            ], JSON_THROW_ON_ERROR);
+            $this->pdo->prepare(
+                "INSERT INTO game_events (game_id, team_id, kind, payload_json)
+                 VALUES (?, ?, 'tickets_decide', ?)"
+            )->execute([$gameId, $teamId, $payload]);
+
+            $this->pdo->commit();
+        } catch (\Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return Response::json(['ok' => true]);
     }
 
     private static function error(string $code, string $message, int $status): Response
