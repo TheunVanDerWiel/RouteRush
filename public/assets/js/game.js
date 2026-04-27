@@ -15,8 +15,18 @@ const SLOT_GAP = 3;
 const SLOT_RADIUS = 1.5;
 const PARALLEL_GAP = 14;
 
+const TEAM_COLORS = (() => {
+    const cs = getComputedStyle(document.documentElement);
+    const out = [];
+    for (let i = 0; i < 5; i++) {
+        out.push((cs.getPropertyValue(`--team-color-${i}`) || '').trim() || '#888');
+    }
+    return out;
+})();
+
 let endsAtMs = null;
 let mapData = null;
+let lastState = null;
 
 async function fetchMap() {
     const res = await fetch(`/api/games/${encodeURIComponent(code)}/map`, {
@@ -214,13 +224,21 @@ function setupPanZoom(svg, baseW, baseH) {
         zoomAround(e.clientX, e.clientY, vb.w * factor);
     }, { passive: false });
 
+    const TAP_MAX_MOVE = 8;
+    let dragMoved = false;
+    let suppressNextClick = false;
+
     let mousePan = null;
     svg.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
-        mousePan = { lastX: e.clientX, lastY: e.clientY };
+        mousePan = { lastX: e.clientX, lastY: e.clientY, startX: e.clientX, startY: e.clientY };
+        dragMoved = false;
     });
     window.addEventListener('mousemove', (e) => {
         if (!mousePan) return;
+        if (Math.hypot(e.clientX - mousePan.startX, e.clientY - mousePan.startY) > TAP_MAX_MOVE) {
+            dragMoved = true;
+        }
         const k = 1 / fit().scale;
         vb.x -= (e.clientX - mousePan.lastX) * k;
         vb.y -= (e.clientY - mousePan.lastY) * k;
@@ -231,9 +249,19 @@ function setupPanZoom(svg, baseW, baseH) {
     });
     window.addEventListener('mouseup', () => { mousePan = null; });
 
+    svg.addEventListener('click', (e) => {
+        if (dragMoved || suppressNextClick) {
+            e.stopPropagation();
+            e.preventDefault();
+        }
+        dragMoved = false;
+        suppressNextClick = false;
+    }, true);
+
     const touches = new Map();
     let pinch = null;
     let touchPan = null;
+    let tapStart = null;
 
     const refreshTouchMode = () => {
         if (touches.size >= 2) {
@@ -257,18 +285,31 @@ function setupPanZoom(svg, baseW, baseH) {
     };
 
     svg.addEventListener('touchstart', (e) => {
-        e.preventDefault();
         for (const t of e.changedTouches) {
             touches.set(t.identifier, { x: t.clientX, y: t.clientY });
         }
+        if (touches.size === 1) {
+            const [t] = touches.values();
+            tapStart = { x: t.x, y: t.y };
+        } else {
+            tapStart = null;
+            suppressNextClick = true;
+        }
         refreshTouchMode();
-    }, { passive: false });
+    }, { passive: true });
 
     svg.addEventListener('touchmove', (e) => {
         e.preventDefault();
         for (const t of e.changedTouches) {
             if (touches.has(t.identifier)) {
                 touches.set(t.identifier, { x: t.clientX, y: t.clientY });
+            }
+        }
+        if (tapStart && touches.size === 1) {
+            const [t] = touches.values();
+            if (Math.hypot(t.x - tapStart.x, t.y - tapStart.y) > TAP_MAX_MOVE) {
+                tapStart = null;
+                suppressNextClick = true;
             }
         }
         if (pinch && touches.size >= 2) {
@@ -345,6 +386,10 @@ function renderRoute(route, stopsById, colorsById, perpOffset) {
     const g = document.createElementNS(SVG_NS, 'g');
     g.setAttribute('class', 'route');
     g.dataset.routeId = String(route.id);
+    g.dataset.colorId = String(route.color_id);
+    g.dataset.length = String(route.length);
+    g.dataset.originalFill = fill;
+    g.addEventListener('click', () => onRouteClick(route));
 
     for (let i = 0; i < route.length; i++) {
         const along = i * (slotW + SLOT_GAP) + slotW / 2;
@@ -401,11 +446,31 @@ function renderStop(stop) {
 }
 
 function renderState(state) {
+    lastState = state;
     if (state.game.ends_at) {
         endsAtMs = Date.parse(state.game.ends_at);
     }
     deckRemainingEl.textContent = String(state.game.deck_remaining);
     renderHand(state);
+    applyClaims(state.claims || []);
+}
+
+function applyClaims(claims) {
+    if (!mapData) return;
+    const claimedBy = new Map();
+    for (const c of claims) {
+        claimedBy.set(c.route_id, c.team_color_index);
+    }
+    for (const g of mapFrameEl.querySelectorAll('.route')) {
+        const routeId = parseInt(g.dataset.routeId, 10);
+        const teamIdx = claimedBy.get(routeId);
+        const claimed = teamIdx !== undefined;
+        const fill = claimed ? (TEAM_COLORS[teamIdx] || '#888') : g.dataset.originalFill;
+        for (const slot of g.querySelectorAll('.route-slot')) {
+            slot.style.fill = fill;
+        }
+        g.classList.toggle('claimed', claimed);
+    }
 }
 
 function tickCountdown() {
@@ -424,6 +489,166 @@ async function pollState() {
     const state = await fetchState();
     if (state) renderState(state);
     setTimeout(pollState, POLL_INTERVAL_MS);
+}
+
+async function onRouteClick(route) {
+    if (!mapData) return;
+    const fresh = await fetchState();
+    if (!fresh) return;
+    renderState(fresh);
+    if (fresh.game.status !== 'in_progress') {
+        window.alert('Game is not in progress.');
+        return;
+    }
+    if ((fresh.claims || []).some((c) => c.route_id === route.id)) {
+        window.alert('This route was just claimed.');
+        return;
+    }
+    const color = mapData.colors.find((c) => c.id === route.color_id);
+    const haveColor = (fresh.team.hand && fresh.team.hand[String(route.color_id)]) || 0;
+    const haveLoco = fresh.team.locomotives_in_hand || 0;
+    if (haveColor + haveLoco < route.length) {
+        window.alert(`Not enough cards. Need ${route.length}, you have ${haveColor} ${color ? color.display_name : ''} + ${haveLoco} loco.`);
+        return;
+    }
+
+    const choice = await openClaimDialog({ route, color, haveColor, haveLoco });
+    if (!choice) return;
+
+    const res = await fetch(`/api/games/${encodeURIComponent(code)}/claim`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            route_id: route.id,
+            spend: choice.spend,
+            spend_locomotives: choice.spend_locomotives,
+        }),
+    });
+    let data = null;
+    try { data = await res.json(); } catch { /* ignore */ }
+    if (!res.ok) {
+        window.alert((data && data.message) || 'Could not claim route.');
+        const next = await fetchState();
+        if (next) renderState(next);
+        return;
+    }
+    const next = await fetchState();
+    if (next) renderState(next);
+}
+
+function openClaimDialog({ route, color, haveColor, haveLoco }) {
+    return new Promise((resolve) => {
+        const length = route.length;
+        const colorName = color ? color.display_name : 'Unknown';
+        const safeHex = color && /^#[0-9a-fA-F]{6}$/.test(color.hex) ? color.hex : '#888';
+
+        // Default: use color cards first, top up with locos.
+        let loco = Math.max(0, length - haveColor);
+        if (loco > haveLoco) loco = haveLoco;
+
+        const dlg = document.createElement('dialog');
+        dlg.className = 'claim-dialog';
+
+        const form = document.createElement('form');
+        form.method = 'dialog';
+
+        const title = document.createElement('h3');
+        title.className = 'claim-title';
+        title.textContent = `Claim ${colorName} route`;
+        form.appendChild(title);
+
+        const lengthRow = document.createElement('p');
+        lengthRow.className = 'claim-row';
+        lengthRow.append(document.createTextNode('Length: '));
+        const lengthStrong = document.createElement('strong');
+        lengthStrong.textContent = String(length);
+        lengthRow.appendChild(lengthStrong);
+        form.appendChild(lengthRow);
+
+        const colorRow = document.createElement('p');
+        colorRow.className = 'claim-row';
+        colorRow.append(document.createTextNode('Color: '));
+        const swatch = document.createElement('span');
+        swatch.className = 'claim-swatch';
+        swatch.style.background = safeHex;
+        colorRow.appendChild(swatch);
+        const colorLabel = document.createElement('span');
+        colorLabel.textContent = colorName;
+        colorRow.appendChild(colorLabel);
+        form.appendChild(colorRow);
+
+        const stepperRow = document.createElement('div');
+        stepperRow.className = 'claim-stepper-row';
+        const stepperLabel = document.createElement('span');
+        stepperLabel.textContent = 'Locomotives:';
+        stepperRow.appendChild(stepperLabel);
+        const stepper = document.createElement('div');
+        stepper.className = 'claim-stepper';
+        const dec = document.createElement('button');
+        dec.type = 'button';
+        dec.className = 'step-btn';
+        dec.setAttribute('aria-label', 'Fewer locomotives');
+        dec.textContent = '\u2212';
+        const out = document.createElement('output');
+        out.className = 'step-out mono';
+        const inc = document.createElement('button');
+        inc.type = 'button';
+        inc.className = 'step-btn';
+        inc.setAttribute('aria-label', 'More locomotives');
+        inc.textContent = '+';
+        stepper.append(dec, out, inc);
+        stepperRow.appendChild(stepper);
+        form.appendChild(stepperRow);
+
+        const totals = document.createElement('p');
+        totals.className = 'claim-totals';
+        form.appendChild(totals);
+
+        const menu = document.createElement('div');
+        menu.className = 'claim-menu';
+        const cancel = document.createElement('button');
+        cancel.type = 'button';
+        cancel.className = 'claim-cancel';
+        cancel.textContent = 'Cancel';
+        const confirm = document.createElement('button');
+        confirm.type = 'button';
+        confirm.className = 'claim-confirm';
+        confirm.textContent = 'Claim';
+        menu.append(cancel, confirm);
+        form.appendChild(menu);
+
+        dlg.appendChild(form);
+        document.body.appendChild(dlg);
+
+        const update = () => {
+            const colorNeeded = length - loco;
+            out.textContent = String(loco);
+            const ok = colorNeeded >= 0 && colorNeeded <= haveColor && loco <= haveLoco && loco >= 0;
+            totals.textContent = `${colorNeeded} ${colorName} (have ${haveColor})  +  ${loco} loco (have ${haveLoco})`;
+            confirm.disabled = !ok;
+            dec.disabled = loco <= 0;
+            inc.disabled = loco >= length || loco >= haveLoco;
+        };
+        dec.addEventListener('click', () => { if (loco > 0) { loco--; update(); } });
+        inc.addEventListener('click', () => { if (loco < length && loco < haveLoco) { loco++; update(); } });
+        cancel.addEventListener('click', () => dlg.close('cancel'));
+        confirm.addEventListener('click', () => dlg.close('confirm'));
+
+        dlg.addEventListener('close', () => {
+            const value = dlg.returnValue;
+            dlg.remove();
+            if (value !== 'confirm') {
+                resolve(null);
+                return;
+            }
+            const colorNeeded = length - loco;
+            const spend = colorNeeded > 0 ? { [String(route.color_id)]: colorNeeded } : {};
+            resolve({ spend, spend_locomotives: loco });
+        });
+
+        update();
+        dlg.showModal();
+    });
 }
 
 async function bootstrap() {

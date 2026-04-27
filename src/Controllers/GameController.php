@@ -487,6 +487,19 @@ final class GameController
         $stmt->execute([$teamId]);
         $locoInHand = (int) $stmt->fetch()['locomotives_in_hand'];
 
+        $stmt = $this->pdo->prepare(
+            'SELECT c.route_id, t.color_index
+               FROM game_claims c
+               JOIN game_teams  t ON t.id = c.team_id
+              WHERE c.game_id = ?
+           ORDER BY c.id'
+        );
+        $stmt->execute([(int) $row['id']]);
+        $claims = array_map(static fn(array $c) => [
+            'route_id'         => (int) $c['route_id'],
+            'team_color_index' => (int) $c['color_index'],
+        ], $stmt->fetchAll());
+
         return Response::json([
             'mode' => 'snapshot',
             'game' => [
@@ -499,6 +512,215 @@ final class GameController
                 'id'                  => $teamId,
                 'hand'                => (object) $hand,
                 'locomotives_in_hand' => $locoInHand,
+            ],
+            'claims' => $claims,
+        ]);
+    }
+
+    public function claim(Request $r, string $code): Response
+    {
+        $ct = $r->headers['Content-Type'] ?? $r->headers['content-type'] ?? '';
+        if (!str_contains((string) $ct, 'application/json')) {
+            return self::error('unsupported_media_type', 'Content-Type must be application/json', 415);
+        }
+
+        $playerId = $_SESSION['player_id'] ?? null;
+        if ($playerId === null) {
+            return self::error('not_authenticated', 'Sign in by creating or joining a team first', 401);
+        }
+
+        $routeId    = filter_var($r->body['route_id']          ?? null, FILTER_VALIDATE_INT);
+        $spendRaw   = $r->body['spend']                        ?? null;
+        $spendLoco  = filter_var($r->body['spend_locomotives'] ?? 0, FILTER_VALIDATE_INT);
+
+        if ($routeId === false || $routeId <= 0 || !is_array($spendRaw) || $spendLoco === false || $spendLoco < 0) {
+            return self::error('invalid_payload', 'route_id, spend (object), spend_locomotives required', 400);
+        }
+
+        $spend = [];
+        foreach ($spendRaw as $key => $val) {
+            $cid = filter_var($key, FILTER_VALIDATE_INT);
+            $cnt = filter_var($val, FILTER_VALIDATE_INT);
+            if ($cid === false || $cid <= 0 || $cnt === false || $cnt < 0) {
+                return self::error('invalid_payload', 'spend keys must be color_ids; values non-negative ints', 400);
+            }
+            if ($cnt > 0) {
+                $spend[$cid] = $cnt;
+            }
+        }
+
+        $code = strtoupper($code);
+
+        $this->pdo->beginTransaction();
+        try {
+            // Lock both the game row and the player's team row to serialize
+            // concurrent claim/draw/trade attempts against this team's hand.
+            $stmt = $this->pdo->prepare(
+                'SELECT g.id  AS game_id, g.status, g.map_id,
+                        t.id  AS team_id, t.locomotives_in_hand,
+                        (SELECT COUNT(*) FROM game_teams        WHERE game_id = g.id)                            AS team_count,
+                        (SELECT COUNT(*) FROM game_team_tickets WHERE team_id = t.id AND status = \'pending\')   AS pending_tickets
+                   FROM games g
+                   JOIN game_players p ON p.id = ?
+                   JOIN game_teams   t ON t.id = p.team_id AND t.game_id = g.id
+                  WHERE g.room_code = ?
+                    FOR UPDATE'
+            );
+            $stmt->execute([(int) $playerId, $code]);
+            $row = $stmt->fetch();
+            if ($row === false) {
+                $this->pdo->rollBack();
+                return self::error('wrong_game', 'You are not part of this game', 403);
+            }
+            if ($row['status'] !== 'in_progress') {
+                $this->pdo->rollBack();
+                return self::error('game_not_in_progress', 'Game is not in progress', 409);
+            }
+            if ((int) $row['pending_tickets'] > 0) {
+                $this->pdo->rollBack();
+                return self::error('pending_tickets', 'Decide on pending tickets before claiming a route', 409);
+            }
+
+            $gameId    = (int) $row['game_id'];
+            $teamId    = (int) $row['team_id'];
+            $teamLoco  = (int) $row['locomotives_in_hand'];
+            $teamCount = (int) $row['team_count'];
+            $mapId     = (int) $row['map_id'];
+
+            $stmt = $this->pdo->prepare(
+                'SELECT id, length, color_id, from_stop_id, to_stop_id
+                   FROM map_routes WHERE id = ? AND map_id = ?'
+            );
+            $stmt->execute([$routeId, $mapId]);
+            $route = $stmt->fetch();
+            if ($route === false) {
+                $this->pdo->rollBack();
+                return self::error('not_found', 'Route not on this map', 404);
+            }
+
+            $colorTotal = array_sum($spend);
+            if ($colorTotal + $spendLoco !== (int) $route['length']) {
+                $this->pdo->rollBack();
+                return self::error('wrong_count', 'Total cards spent must equal route length', 422);
+            }
+            foreach (array_keys($spend) as $cid) {
+                if ($cid !== (int) $route['color_id']) {
+                    $this->pdo->rollBack();
+                    return self::error('wrong_color', "Cards must match route color (id {$route['color_id']})", 422);
+                }
+            }
+            if ($spendLoco > $teamLoco) {
+                $this->pdo->rollBack();
+                return self::error('insufficient_cards', 'Not enough locomotives in hand', 422);
+            }
+            foreach ($spend as $cid => $count) {
+                $stmt = $this->pdo->prepare(
+                    'SELECT count FROM game_team_hands WHERE team_id = ? AND color_id = ?'
+                );
+                $stmt->execute([$teamId, $cid]);
+                $h = $stmt->fetch();
+                if ($h === false || (int) $h['count'] < $count) {
+                    $this->pdo->rollBack();
+                    return self::error('insufficient_cards', "Not enough cards of color $cid in hand", 422);
+                }
+            }
+
+            // Parallel-route rule.
+            $stmt = $this->pdo->prepare(
+                'SELECT id FROM map_routes
+                  WHERE map_id = ? AND id <> ?
+                    AND ((from_stop_id = ? AND to_stop_id = ?)
+                      OR (from_stop_id = ? AND to_stop_id = ?))'
+            );
+            $stmt->execute([
+                $mapId, $routeId,
+                (int) $route['from_stop_id'], (int) $route['to_stop_id'],
+                (int) $route['to_stop_id'],   (int) $route['from_stop_id'],
+            ]);
+            $parallelIds = array_map('intval', array_column($stmt->fetchAll(), 'id'));
+
+            if (!empty($parallelIds)) {
+                $placeholders = implode(',', array_fill(0, count($parallelIds), '?'));
+                if ($teamCount <= 3) {
+                    $stmt = $this->pdo->prepare(
+                        "SELECT 1 FROM game_claims WHERE game_id = ? AND route_id IN ($placeholders) LIMIT 1"
+                    );
+                    $stmt->execute(array_merge([$gameId], $parallelIds));
+                    if ($stmt->fetch() !== false) {
+                        $this->pdo->rollBack();
+                        return self::error('parallel_locked', 'Parallel route already claimed', 409);
+                    }
+                } else {
+                    $stmt = $this->pdo->prepare(
+                        "SELECT 1 FROM game_claims WHERE game_id = ? AND team_id = ? AND route_id IN ($placeholders) LIMIT 1"
+                    );
+                    $stmt->execute(array_merge([$gameId, $teamId], $parallelIds));
+                    if ($stmt->fetch() !== false) {
+                        $this->pdo->rollBack();
+                        return self::error('parallel_locked', 'Your team already claimed the parallel route', 409);
+                    }
+                }
+            }
+
+            // Apply: deduct from hand, return cards to deck.
+            if ($spendLoco > 0) {
+                $this->pdo->prepare(
+                    'UPDATE game_teams SET locomotives_in_hand = locomotives_in_hand - ? WHERE id = ?'
+                )->execute([$spendLoco, $teamId]);
+                $this->pdo->prepare(
+                    'UPDATE games SET locomotives_remaining = locomotives_remaining + ?,
+                                      deck_counter          = deck_counter + ?
+                              WHERE id = ?'
+                )->execute([$spendLoco, $spendLoco, $gameId]);
+            }
+            foreach ($spend as $cid => $count) {
+                $this->pdo->prepare(
+                    'UPDATE game_team_hands SET count = count - ? WHERE team_id = ? AND color_id = ?'
+                )->execute([$count, $teamId, $cid]);
+                $this->pdo->prepare(
+                    'INSERT INTO game_card_pool (game_id, color_id, count) VALUES (?, ?, ?)
+                     ON DUPLICATE KEY UPDATE count = count + VALUES(count)'
+                )->execute([$gameId, $cid, $count]);
+                $this->pdo->prepare(
+                    'UPDATE games SET deck_counter = deck_counter + ? WHERE id = ?'
+                )->execute([$count, $gameId]);
+            }
+
+            try {
+                $this->pdo->prepare(
+                    'INSERT INTO game_claims (game_id, team_id, route_id) VALUES (?, ?, ?)'
+                )->execute([$gameId, $teamId, $routeId]);
+            } catch (PDOException $e) {
+                if ($e->getCode() === '23000') {
+                    $this->pdo->rollBack();
+                    return self::error('already_claimed', 'Route was just claimed by another team', 409);
+                }
+                throw $e;
+            }
+
+            $payload = json_encode([
+                'route_id'          => $routeId,
+                'spend'             => (object) $spend,
+                'spend_locomotives' => $spendLoco,
+            ], JSON_THROW_ON_ERROR);
+            $this->pdo->prepare(
+                "INSERT INTO game_events (game_id, team_id, kind, payload_json)
+                 VALUES (?, ?, 'claim_success', ?)"
+            )->execute([$gameId, $teamId, $payload]);
+
+            $this->pdo->commit();
+        } catch (\Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return Response::json([
+            'ok'    => true,
+            'claim' => [
+                'route_id' => $routeId,
+                'team_id'  => $teamId,
             ],
         ]);
     }
