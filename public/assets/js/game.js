@@ -641,6 +641,29 @@ async function submitDecision() {
     if (next) renderState(next);
 }
 
+async function onDrawTickets() {
+    if (hasPendingTickets(lastState)) {
+        showTicketsReminder('Decide on your tickets before drawing more.');
+        return;
+    }
+    btnDrawTickets.disabled = true;
+    const res = await fetch(`/api/games/${encodeURIComponent(code)}/draw/tickets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+    });
+    let data = null;
+    try { data = await res.json(); } catch { /* ignore */ }
+    if (!res.ok) {
+        window.alert((data && data.message) || 'Could not draw tickets.');
+        const next = await fetchState();
+        if (next) renderState(next);
+        return;
+    }
+    const next = await fetchState();
+    if (next) renderState(next);
+    // Reminder modal is auto-shown by renderTickets when new pending arrive.
+}
+
 async function onDrawCards() {
     if (hasPendingTickets(lastState)) {
         showTicketsReminder('Decide on your tickets before drawing cards.');
@@ -953,6 +976,7 @@ function openClaimDialog({ route, color, haveColor, haveLoco }) {
 async function bootstrap() {
     ticketsDecideBtn.addEventListener('click', submitDecision);
     btnDrawCards.addEventListener('click', onDrawCards);
+    btnDrawTickets.addEventListener('click', onDrawTickets);
     mapData = await fetchMap();
     if (mapData) renderMap(mapData);
     await pollState();

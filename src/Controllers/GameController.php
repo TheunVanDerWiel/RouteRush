@@ -917,6 +917,124 @@ final class GameController
         ]);
     }
 
+    public function drawTickets(string $code): Response
+    {
+        $playerId = $_SESSION['player_id'] ?? null;
+        if ($playerId === null) {
+            return self::error('not_authenticated', 'Sign in by creating or joining a team first', 401);
+        }
+
+        $code = strtoupper($code);
+
+        $this->pdo->beginTransaction();
+        try {
+            $stmt = $this->pdo->prepare(
+                'SELECT g.id AS game_id, g.status, g.started_at, g.map_id,
+                        t.id AS team_id, t.windows_consumed,
+                        (SELECT COUNT(*) FROM game_team_tickets WHERE team_id = t.id AND status = \'pending\') AS pending_tickets
+                   FROM games g
+                   JOIN game_players p ON p.id = ?
+                   JOIN game_teams   t ON t.id = p.team_id AND t.game_id = g.id
+                  WHERE g.room_code = ?
+                    FOR UPDATE'
+            );
+            $stmt->execute([(int) $playerId, $code]);
+            $row = $stmt->fetch();
+            if ($row === false) {
+                $this->pdo->rollBack();
+                return self::error('wrong_game', 'You are not part of this game', 403);
+            }
+            if ($row['status'] !== 'in_progress') {
+                $this->pdo->rollBack();
+                return self::error('game_not_in_progress', 'Game is not in progress', 409);
+            }
+            if ((int) $row['pending_tickets'] > 0) {
+                $this->pdo->rollBack();
+                return self::error('pending_tickets', 'Decide on pending tickets before drawing more', 409);
+            }
+
+            $gameId   = (int) $row['game_id'];
+            $teamId   = (int) $row['team_id'];
+            $mapId    = (int) $row['map_id'];
+            $consumed = (int) $row['windows_consumed'];
+
+            $startedAt = new \DateTimeImmutable($row['started_at'], new \DateTimeZone('UTC'));
+            $now       = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+            $elapsed   = max(0, $now->getTimestamp() - $startedAt->getTimestamp());
+            $accrued   = intdiv($elapsed, 300) + 1;
+            $available = max(0, $accrued - $consumed);
+            if ($available <= 0) {
+                $this->pdo->rollBack();
+                return self::error('no_draw_window', 'No draw windows available yet', 422);
+            }
+
+            // Pool = map tickets not already drawn by any team in this game.
+            $stmt = $this->pdo->prepare(
+                'SELECT mt.id, mt.from_stop_id, mt.to_stop_id, mt.points, mt.is_long_route
+                   FROM map_tickets mt
+                  WHERE mt.map_id = ?
+                    AND mt.id NOT IN (
+                        SELECT gtt.ticket_id
+                          FROM game_team_tickets gtt
+                          JOIN game_teams        gt ON gt.id = gtt.team_id
+                         WHERE gt.game_id = ?
+                    )'
+            );
+            $stmt->execute([$mapId, $gameId]);
+            $pool = $stmt->fetchAll();
+            if (count($pool) < 2) {
+                // Per REQUIREMENTS §7: window is not consumed when pool is empty.
+                $this->pdo->rollBack();
+                return self::error('ticket_pool_empty', 'No tickets remaining to draw', 409);
+            }
+
+            // Pick 2 random distinct tickets.
+            $keys = array_rand($pool, 2);
+            $picked = [$pool[$keys[0]], $pool[$keys[1]]];
+
+            $insert = $this->pdo->prepare(
+                "INSERT INTO game_team_tickets (team_id, ticket_id, status) VALUES (?, ?, 'pending')"
+            );
+            $drawn = [];
+            foreach ($picked as $p) {
+                $insert->execute([$teamId, (int) $p['id']]);
+                $drawn[] = [
+                    'id'            => (int) $p['id'],
+                    'from_stop_id'  => (int) $p['from_stop_id'],
+                    'to_stop_id'    => (int) $p['to_stop_id'],
+                    'points'        => (int) $p['points'],
+                    'is_long_route' => (bool) $p['is_long_route'],
+                ];
+            }
+
+            $this->pdo->prepare(
+                'UPDATE game_teams SET windows_consumed = windows_consumed + 1 WHERE id = ?'
+            )->execute([$teamId]);
+
+            $payload = json_encode([
+                'count'      => 2,
+                'ticket_ids' => array_column($drawn, 'id'),
+            ], JSON_THROW_ON_ERROR);
+            $this->pdo->prepare(
+                "INSERT INTO game_events (game_id, team_id, kind, payload_json)
+                 VALUES (?, ?, 'draw_tickets', ?)"
+            )->execute([$gameId, $teamId, $payload]);
+
+            $this->pdo->commit();
+        } catch (\Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return Response::json([
+            'ok'                => true,
+            'windows_remaining' => $available - 1,
+            'drawn_tickets'     => $drawn,
+        ]);
+    }
+
     public function decideTickets(Request $r, string $code): Response
     {
         $ct = $r->headers['Content-Type'] ?? $r->headers['content-type'] ?? '';
