@@ -386,13 +386,15 @@ final class GameController
             return self::error('not_found', 'Game not found', 404);
         }
 
+        $mapId = (int) $map['id'];
+
         $stmt = $this->pdo->prepare(
             'SELECT id, display_name, hex, symbol, deck_count
                FROM map_colors
               WHERE map_id = ?
            ORDER BY id'
         );
-        $stmt->execute([(int) $map['id']]);
+        $stmt->execute([$mapId]);
         $colors = array_map(static fn(array $c) => [
             'id'           => (int) $c['id'],
             'display_name' => $c['display_name'],
@@ -401,8 +403,33 @@ final class GameController
             'deck_count'   => (int) $c['deck_count'],
         ], $stmt->fetchAll());
 
+        $stmt = $this->pdo->prepare(
+            'SELECT id, display_name, x, y FROM map_stops WHERE map_id = ? ORDER BY id'
+        );
+        $stmt->execute([$mapId]);
+        $stops = array_map(static fn(array $s) => [
+            'id'           => (int) $s['id'],
+            'display_name' => $s['display_name'],
+            'x'            => (int) $s['x'],
+            'y'            => (int) $s['y'],
+        ], $stmt->fetchAll());
+
+        $stmt = $this->pdo->prepare(
+            'SELECT id, from_stop_id, to_stop_id, length, color_id, parallel_index
+               FROM map_routes WHERE map_id = ? ORDER BY id'
+        );
+        $stmt->execute([$mapId]);
+        $routes = array_map(static fn(array $r) => [
+            'id'             => (int) $r['id'],
+            'from_stop_id'   => (int) $r['from_stop_id'],
+            'to_stop_id'     => (int) $r['to_stop_id'],
+            'length'         => (int) $r['length'],
+            'color_id'       => (int) $r['color_id'],
+            'parallel_index' => (int) $r['parallel_index'],
+        ], $stmt->fetchAll());
+
         return Response::json([
-            'id'                   => (int) $map['id'],
+            'id'                   => $mapId,
             'name'                 => $map['name'],
             'viewbox_w'            => (int) $map['viewbox_w'],
             'viewbox_h'            => (int) $map['viewbox_h'],
@@ -411,6 +438,8 @@ final class GameController
             'max_teams'            => (int) $map['max_teams'],
             'locomotives_count'    => (int) $map['locomotives_count'],
             'colors'               => $colors,
+            'stops'                => $stops,
+            'routes'               => $routes,
         ]);
     }
 

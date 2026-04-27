@@ -262,15 +262,47 @@ button:disabled {
     overflow: hidden;
 }
 
-.map-placeholder {
-    min-height: 50vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    border-radius: var(--radius);
-    border-width: 0;
+.map-frame {
+    width: 100%;
+    height: 60vh;
+    background: #f0f3f8;
+}
+
+.game-map {
+    width: 100%;
+    height: 100%;
+    display: block;
+    touch-action: none;
+}
+
+.route-slot {
+    stroke: rgba(0, 0, 0, 0.35);
+    stroke-width: 0.75;
+}
+
+.stop-circle {
+    fill: #ffffff;
+    stroke: var(--ink);
+    stroke-width: 2;
+}
+
+.stop-label {
+    font: 600 22px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    fill: var(--ink);
+    paint-order: stroke;
+    stroke: #ffffff;
+    stroke-width: 4;
+    stroke-linejoin: round;
+}
+
+.route-slot-label {
+    font: 600 7px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    fill: #ffffff;
+    paint-order: stroke;
+    stroke: rgba(0, 0, 0, 0.55);
+    stroke-width: 1.2;
+    stroke-linejoin: round;
+    pointer-events: none;
 }
 
 /* Hand -------------------------------------------------------------- */

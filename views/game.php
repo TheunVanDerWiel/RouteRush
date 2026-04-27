@@ -31,10 +31,7 @@ use RouteRush\View;
 <main class="container game-container">
 
     <section class="card map-card">
-        <div class="placeholder map-placeholder" id="game-map" role="img" aria-label="Map placeholder">
-            <span class="placeholder-label">Map</span>
-            <span class="placeholder-hint">Pinch-zoom &amp; pan SVG. Stops, routes, and team claims will render here.</span>
-        </div>
+        <div class="map-frame" id="map-frame" role="img" aria-label="Game map"></div>
     </section>
 
     <section class="card hand-card">
