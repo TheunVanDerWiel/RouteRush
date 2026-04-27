@@ -118,6 +118,198 @@ function renderMap(map) {
     svg.appendChild(stopLayer);
 
     mapFrameEl.replaceChildren(svg);
+    const controls = setupPanZoom(svg, map.viewbox_w, map.viewbox_h);
+    mapFrameEl.appendChild(buildZoomControls(svg, controls));
+}
+
+function buildZoomControls(svg, controls) {
+    const wrap = document.createElement('div');
+    wrap.className = 'map-zoom-controls';
+    wrap.appendChild(makeZoomButton('+', 'Zoom in', () => controls.zoomBy(1 / 1.4, svg)));
+    wrap.appendChild(makeZoomButton('\u2212', 'Zoom out', () => controls.zoomBy(1.4, svg)));
+    return wrap;
+}
+
+function makeZoomButton(label, ariaLabel, onClick) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'map-zoom-btn';
+    btn.setAttribute('aria-label', ariaLabel);
+    btn.textContent = label;
+    btn.addEventListener('click', onClick);
+    return btn;
+}
+
+function setupPanZoom(svg, baseW, baseH) {
+    const MAX_ZOOM = 10;
+    const ratio = baseH / baseW;
+    const vb = { x: 0, y: 0, w: baseW, h: baseH };
+
+    const apply = () => svg.setAttribute('viewBox', `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
+
+    // Compute the displayed scale (px per SVG unit) honouring
+    // preserveAspectRatio="meet" letterboxing.
+    const fit = () => {
+        const rect = svg.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) {
+            return { rect, scale: 1, offsetX: 0, offsetY: 0 };
+        }
+        const scale = Math.min(rect.width / vb.w, rect.height / vb.h);
+        return {
+            rect,
+            scale,
+            offsetX: (rect.width - vb.w * scale) / 2,
+            offsetY: (rect.height - vb.h * scale) / 2,
+        };
+    };
+
+    const screenToSvg = (clientX, clientY) => {
+        const f = fit();
+        return {
+            x: (clientX - f.rect.left - f.offsetX) / f.scale + vb.x,
+            y: (clientY - f.rect.top - f.offsetY) / f.scale + vb.y,
+        };
+    };
+
+    const clampPan = () => {
+        if (vb.w >= baseW) {
+            vb.x = (baseW - vb.w) / 2;
+        } else {
+            if (vb.x < 0) vb.x = 0;
+            if (vb.x + vb.w > baseW) vb.x = baseW - vb.w;
+        }
+        if (vb.h >= baseH) {
+            vb.y = (baseH - vb.h) / 2;
+        } else {
+            if (vb.y < 0) vb.y = 0;
+            if (vb.y + vb.h > baseH) vb.y = baseH - vb.h;
+        }
+    };
+
+    const clampW = (w) => {
+        const minW = baseW / MAX_ZOOM;
+        return Math.min(baseW, Math.max(minW, w));
+    };
+
+    // Keep `anchor` (in SVG coords) under the screen point (clientX, clientY)
+    // after vb.w/vb.h have already been updated.
+    const anchorAt = (anchor, clientX, clientY) => {
+        const f = fit();
+        vb.x = anchor.x - (clientX - f.rect.left - f.offsetX) / f.scale;
+        vb.y = anchor.y - (clientY - f.rect.top - f.offsetY) / f.scale;
+    };
+
+    const zoomAround = (clientX, clientY, newW) => {
+        const anchor = screenToSvg(clientX, clientY);
+        vb.w = clampW(newW);
+        vb.h = vb.w * ratio;
+        anchorAt(anchor, clientX, clientY);
+        clampPan();
+        apply();
+    };
+
+    svg.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15;
+        zoomAround(e.clientX, e.clientY, vb.w * factor);
+    }, { passive: false });
+
+    let mousePan = null;
+    svg.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        mousePan = { lastX: e.clientX, lastY: e.clientY };
+    });
+    window.addEventListener('mousemove', (e) => {
+        if (!mousePan) return;
+        const k = 1 / fit().scale;
+        vb.x -= (e.clientX - mousePan.lastX) * k;
+        vb.y -= (e.clientY - mousePan.lastY) * k;
+        mousePan.lastX = e.clientX;
+        mousePan.lastY = e.clientY;
+        clampPan();
+        apply();
+    });
+    window.addEventListener('mouseup', () => { mousePan = null; });
+
+    const touches = new Map();
+    let pinch = null;
+    let touchPan = null;
+
+    const refreshTouchMode = () => {
+        if (touches.size >= 2) {
+            const [t1, t2] = [...touches.values()];
+            const cx = (t1.x + t2.x) / 2;
+            const cy = (t1.y + t2.y) / 2;
+            pinch = {
+                dist: Math.hypot(t2.x - t1.x, t2.y - t1.y) || 1,
+                vbW: vb.w,
+                anchor: screenToSvg(cx, cy),
+            };
+            touchPan = null;
+        } else if (touches.size === 1) {
+            const [t] = touches.values();
+            touchPan = { lastX: t.x, lastY: t.y };
+            pinch = null;
+        } else {
+            pinch = null;
+            touchPan = null;
+        }
+    };
+
+    svg.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        for (const t of e.changedTouches) {
+            touches.set(t.identifier, { x: t.clientX, y: t.clientY });
+        }
+        refreshTouchMode();
+    }, { passive: false });
+
+    svg.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        for (const t of e.changedTouches) {
+            if (touches.has(t.identifier)) {
+                touches.set(t.identifier, { x: t.clientX, y: t.clientY });
+            }
+        }
+        if (pinch && touches.size >= 2) {
+            const [t1, t2] = [...touches.values()];
+            const cx = (t1.x + t2.x) / 2;
+            const cy = (t1.y + t2.y) / 2;
+            const dist = Math.hypot(t2.x - t1.x, t2.y - t1.y) || 1;
+            vb.w = clampW(pinch.vbW * (pinch.dist / dist));
+            vb.h = vb.w * ratio;
+            anchorAt(pinch.anchor, cx, cy);
+            clampPan();
+            apply();
+        } else if (touchPan && touches.size === 1) {
+            const [t] = touches.values();
+            const k = 1 / fit().scale;
+            vb.x -= (t.x - touchPan.lastX) * k;
+            vb.y -= (t.y - touchPan.lastY) * k;
+            touchPan.lastX = t.x;
+            touchPan.lastY = t.y;
+            clampPan();
+            apply();
+        }
+    }, { passive: false });
+
+    const endTouch = (e) => {
+        for (const t of e.changedTouches) {
+            touches.delete(t.identifier);
+        }
+        refreshTouchMode();
+    };
+    svg.addEventListener('touchend', endTouch);
+    svg.addEventListener('touchcancel', endTouch);
+
+    apply();
+
+    return {
+        zoomBy: (factor, target) => {
+            const rect = (target || svg).getBoundingClientRect();
+            zoomAround(rect.left + rect.width / 2, rect.top + rect.height / 2, vb.w * factor);
+        },
+    };
 }
 
 function renderRoute(route, stopsById, colorsById, perpOffset) {
