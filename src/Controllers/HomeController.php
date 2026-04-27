@@ -35,4 +35,20 @@ final class HomeController
             'player_id' => $_SESSION['player_id'] ?? null,
         ]));
     }
+
+    public function game(string $code): Response
+    {
+        $stmt = $this->pdo->prepare('SELECT id FROM games WHERE room_code = ?');
+        $stmt->execute([strtoupper($code)]);
+        $game = $stmt->fetch();
+
+        if ($game === false) {
+            return Response::html(View::render('not_found', ['code' => $code]), 404);
+        }
+
+        return Response::html(View::render('game', [
+            'code' => strtoupper($code),
+            'player_id' => $_SESSION['player_id'] ?? null,
+        ]));
+    }
 }

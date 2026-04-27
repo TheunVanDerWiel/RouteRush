@@ -181,3 +181,221 @@ button:disabled {
 [data-color-index="2"] .swatch { background: var(--team-color-2); }
 [data-color-index="3"] .swatch { background: var(--team-color-3); }
 [data-color-index="4"] .swatch { background: var(--team-color-4); }
+
+/* ---------- In-game screen ---------- */
+
+.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+.game-body { padding-bottom: 24px; }
+
+.game-header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    background: var(--accent);
+    color: var(--accent-ink);
+    padding: 10px 16px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+.game-header-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    line-height: 1.1;
+}
+
+.game-header-label {
+    font-size: 0.7rem;
+    opacity: 0.75;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.game-header-value {
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin-top: 2px;
+}
+
+.game-container {
+    padding-top: 12px;
+}
+
+/* Placeholders ------------------------------------------------------- */
+
+.placeholder {
+    border: 2px dashed var(--border);
+    background: repeating-linear-gradient(
+        45deg,
+        transparent 0 8px,
+        rgba(29, 53, 87, 0.04) 8px 16px
+    );
+    color: var(--ink-soft);
+}
+
+.placeholder-row {
+    opacity: 0.65;
+}
+
+.placeholder-label {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--ink);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.placeholder-hint {
+    font-size: 0.85rem;
+    text-align: center;
+    max-width: 28ch;
+}
+
+/* Map --------------------------------------------------------------- */
+
+.map-card {
+    padding: 0;
+    overflow: hidden;
+}
+
+.map-placeholder {
+    min-height: 50vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border-radius: var(--radius);
+    border-width: 0;
+}
+
+/* Hand -------------------------------------------------------------- */
+
+.hand-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+}
+
+.hand-card-pill {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+}
+
+.hand-card-pill .card-color-swatch {
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.hand-card-pill .card-color-name {
+    flex: 1;
+    font-size: 0.85rem;
+    color: var(--ink-soft);
+}
+
+.hand-card-pill .card-count {
+    font-weight: 700;
+    font-size: 1rem;
+}
+
+[data-card-color="red"]    .card-color-swatch { background: #e63946; }
+[data-card-color="blue"]   .card-color-swatch { background: #1d3557; }
+[data-card-color="green"]  .card-color-swatch { background: #2a9d8f; }
+[data-card-color="yellow"] .card-color-swatch { background: #f4d35e; }
+[data-card-color="black"]  .card-color-swatch { background: #2b2d42; }
+[data-card-color="loco"]   .card-color-swatch {
+    background: linear-gradient(45deg, #fff 0 25%, #c0c0c0 25% 50%, #fff 50% 75%, #c0c0c0 75%);
+    background-size: 8px 8px;
+}
+
+/* Actions ----------------------------------------------------------- */
+
+.action-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+}
+
+.action-grid button {
+    min-height: 48px;
+    padding: 8px 12px;
+    font-size: 0.95rem;
+}
+
+/* Tickets ----------------------------------------------------------- */
+
+.tickets-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.ticket-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.ticket-row.long {
+    border-color: var(--accent);
+}
+
+.ticket-route { font-weight: 600; }
+
+.badge {
+    display: inline-block;
+    background: var(--accent);
+    color: var(--accent-ink);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 1px 6px;
+    border-radius: 4px;
+    margin-left: 4px;
+    vertical-align: middle;
+}
+
+/* Log --------------------------------------------------------------- */
+
+.log-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.log-row {
+    display: flex;
+    gap: 10px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.9rem;
+}
+
+.log-row:last-child { border-bottom: none; }
+
+.log-time { color: var(--ink-soft); flex-shrink: 0; }

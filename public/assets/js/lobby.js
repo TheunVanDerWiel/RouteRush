@@ -86,6 +86,11 @@ function syncJoinTeamSelect(state) {
 }
 
 function renderState(state) {
+    if (state.status === 'in_progress') {
+        window.location.href = `/game/${encodeURIComponent(code)}`;
+        return;
+    }
+
     mapNameEl.textContent = state.map.name;
     durationEl.textContent = Math.round(state.duration_seconds / 60);
     gameInfo.hidden = false;
