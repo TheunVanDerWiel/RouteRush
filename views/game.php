@@ -39,38 +39,7 @@ use RouteRush\View;
 
     <section class="card hand-card">
         <h2>Your hand</h2>
-        <ul class="hand-list">
-            <li class="hand-card-pill" data-card-color="red">
-                <span class="card-color-swatch" aria-hidden="true"></span>
-                <span class="card-color-name">Red</span>
-                <span class="card-count mono">—</span>
-            </li>
-            <li class="hand-card-pill" data-card-color="blue">
-                <span class="card-color-swatch" aria-hidden="true"></span>
-                <span class="card-color-name">Blue</span>
-                <span class="card-count mono">—</span>
-            </li>
-            <li class="hand-card-pill" data-card-color="green">
-                <span class="card-color-swatch" aria-hidden="true"></span>
-                <span class="card-color-name">Green</span>
-                <span class="card-count mono">—</span>
-            </li>
-            <li class="hand-card-pill" data-card-color="yellow">
-                <span class="card-color-swatch" aria-hidden="true"></span>
-                <span class="card-color-name">Yellow</span>
-                <span class="card-count mono">—</span>
-            </li>
-            <li class="hand-card-pill" data-card-color="black">
-                <span class="card-color-swatch" aria-hidden="true"></span>
-                <span class="card-color-name">Black</span>
-                <span class="card-count mono">—</span>
-            </li>
-            <li class="hand-card-pill" data-card-color="loco">
-                <span class="card-color-swatch" aria-hidden="true"></span>
-                <span class="card-color-name">Loco</span>
-                <span class="card-count mono">—</span>
-            </li>
-        </ul>
+        <ul class="hand-list" id="hand"></ul>
     </section>
 
     <section class="card actions-card">

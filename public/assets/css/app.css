@@ -280,8 +280,14 @@ button:disabled {
     margin: 0;
     padding: 0;
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
     gap: 8px;
+}
+
+@media (min-width: 480px) {
+    .hand-list {
+        grid-template-columns: repeat(3, 1fr);
+    }
 }
 
 .hand-card-pill {
@@ -313,12 +319,7 @@ button:disabled {
     font-size: 1rem;
 }
 
-[data-card-color="red"]    .card-color-swatch { background: #e63946; }
-[data-card-color="blue"]   .card-color-swatch { background: #1d3557; }
-[data-card-color="green"]  .card-color-swatch { background: #2a9d8f; }
-[data-card-color="yellow"] .card-color-swatch { background: #f4d35e; }
-[data-card-color="black"]  .card-color-swatch { background: #2b2d42; }
-[data-card-color="loco"]   .card-color-swatch {
+.hand-card-pill .loco-swatch {
     background: linear-gradient(45deg, #fff 0 25%, #c0c0c0 25% 50%, #fff 50% 75%, #c0c0c0 75%);
     background-size: 8px 8px;
 }

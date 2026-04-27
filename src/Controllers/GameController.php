@@ -369,6 +369,111 @@ final class GameController
         ]);
     }
 
+    public function map(string $code): Response
+    {
+        $code = strtoupper($code);
+
+        $stmt = $this->pdo->prepare(
+            'SELECT m.id, m.name, m.viewbox_w, m.viewbox_h, m.starting_train_cards,
+                    m.min_teams, m.max_teams, m.locomotives_count
+               FROM games g
+               JOIN maps  m ON m.id = g.map_id
+              WHERE g.room_code = ?'
+        );
+        $stmt->execute([$code]);
+        $map = $stmt->fetch();
+        if ($map === false) {
+            return self::error('not_found', 'Game not found', 404);
+        }
+
+        $stmt = $this->pdo->prepare(
+            'SELECT id, display_name, hex, symbol, deck_count
+               FROM map_colors
+              WHERE map_id = ?
+           ORDER BY id'
+        );
+        $stmt->execute([(int) $map['id']]);
+        $colors = array_map(static fn(array $c) => [
+            'id'           => (int) $c['id'],
+            'display_name' => $c['display_name'],
+            'hex'          => $c['hex'],
+            'symbol'       => $c['symbol'],
+            'deck_count'   => (int) $c['deck_count'],
+        ], $stmt->fetchAll());
+
+        return Response::json([
+            'id'                   => (int) $map['id'],
+            'name'                 => $map['name'],
+            'viewbox_w'            => (int) $map['viewbox_w'],
+            'viewbox_h'            => (int) $map['viewbox_h'],
+            'starting_train_cards' => (int) $map['starting_train_cards'],
+            'min_teams'            => (int) $map['min_teams'],
+            'max_teams'            => (int) $map['max_teams'],
+            'locomotives_count'    => (int) $map['locomotives_count'],
+            'colors'               => $colors,
+        ]);
+    }
+
+    public function state(string $code): Response
+    {
+        $code = strtoupper($code);
+
+        $playerId = $_SESSION['player_id'] ?? null;
+        if ($playerId === null) {
+            return self::error('not_authenticated', 'Sign in by creating or joining a team first', 401);
+        }
+
+        $stmt = $this->pdo->prepare(
+            'SELECT g.id, g.status, g.duration_seconds, g.started_at, g.deck_counter, g.locomotives_remaining,
+                    p.team_id
+               FROM games g
+               JOIN game_players p ON p.team_id IN (SELECT id FROM game_teams WHERE game_id = g.id)
+              WHERE g.room_code = ? AND p.id = ?'
+        );
+        $stmt->execute([$code, (int) $playerId]);
+        $row = $stmt->fetch();
+        if ($row === false) {
+            return self::error('wrong_game', 'You are not part of this game', 403);
+        }
+
+        $teamId = (int) $row['team_id'];
+
+        $endsAtIso = null;
+        if ($row['started_at'] !== null && $row['status'] !== 'lobby') {
+            $started   = new \DateTimeImmutable($row['started_at'], new \DateTimeZone('UTC'));
+            $endsAtIso = $started->modify('+' . (int) $row['duration_seconds'] . ' seconds')
+                                 ->format('Y-m-d\TH:i:s.v\Z');
+        }
+
+        $stmt = $this->pdo->prepare(
+            'SELECT color_id, count FROM game_team_hands WHERE team_id = ? AND count > 0'
+        );
+        $stmt->execute([$teamId]);
+        $hand = [];
+        foreach ($stmt->fetchAll() as $h) {
+            $hand[(string) (int) $h['color_id']] = (int) $h['count'];
+        }
+
+        $stmt = $this->pdo->prepare('SELECT locomotives_in_hand FROM game_teams WHERE id = ?');
+        $stmt->execute([$teamId]);
+        $locoInHand = (int) $stmt->fetch()['locomotives_in_hand'];
+
+        return Response::json([
+            'mode' => 'snapshot',
+            'game' => [
+                'status'                => $row['status'],
+                'ends_at'               => $endsAtIso,
+                'deck_remaining'        => (int) $row['deck_counter'],
+                'locomotives_remaining' => (int) $row['locomotives_remaining'],
+            ],
+            'team' => [
+                'id'                  => $teamId,
+                'hand'                => (object) $hand,
+                'locomotives_in_hand' => $locoInHand,
+            ],
+        ]);
+    }
+
     private static function error(string $code, string $message, int $status): Response
     {
         return Response::json(['error' => $code, 'message' => $message], $status);
