@@ -28,7 +28,7 @@ use RouteRush\View;
     </div>
 </header>
 
-<main class="container game-container">
+<main class="container game-container" id="game-container">
 
     <section class="card map-card">
         <div class="map-frame" id="map-frame" role="img" aria-label="Game map"></div>
@@ -96,6 +96,17 @@ use RouteRush\View;
         </ul>
     </section>
 
+</main>
+
+<main class="container scoreboard-container" id="scoreboard" hidden>
+    <section class="card">
+        <h1 class="scoreboard-title">Game over</h1>
+        <p class="hint">Final standings</p>
+    </section>
+    <ol class="scoreboard-list" id="scoreboard-list"></ol>
+    <section class="card scoreboard-actions">
+        <a class="home-link" href="/">Back to home</a>
+    </section>
 </main>
 <script src="/assets/js/game.js" type="module"></script>
 </body>

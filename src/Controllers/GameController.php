@@ -465,6 +465,13 @@ final class GameController
             return self::error('wrong_game', 'You are not part of this game', 403);
         }
 
+        // Lazy finalization: if the wall-clock duration has elapsed but the
+        // game is still flagged in_progress, transition it now.
+        if ($this->finalizeIfDue((int) $row['id'], $row['started_at'], $row['status'], (int) $row['duration_seconds'])) {
+            $stmt->execute([$code, (int) $playerId]);
+            $row = $stmt->fetch();
+        }
+
         $teamId = (int) $row['team_id'];
 
         $endsAtIso = null;
@@ -541,7 +548,7 @@ final class GameController
             }
         }
 
-        return Response::json([
+        $response = [
             'mode' => 'snapshot',
             'game' => [
                 'status'                => $row['status'],
@@ -559,7 +566,11 @@ final class GameController
                 'pending_tickets'        => $pending,
             ],
             'claims' => $claims,
-        ]);
+        ];
+        if ($row['status'] === 'ended') {
+            $response['final'] = $this->buildScoreboard((int) $row['id']);
+        }
+        return Response::json($response);
     }
 
     public function claim(Request $r, string $code): Response
@@ -1390,6 +1401,250 @@ final class GameController
         }
 
         return Response::json(['ok' => true]);
+    }
+
+    private const ROUTE_POINTS = [1 => 1, 2 => 2, 3 => 4, 4 => 7, 5 => 10, 6 => 15];
+    private const LONGEST_ROUTE_BONUS = 10;
+
+    private function finalizeIfDue(int $gameId, ?string $startedAt, string $status, int $duration): bool
+    {
+        if ($status !== 'in_progress' || $startedAt === null) {
+            return false;
+        }
+        $started = new \DateTimeImmutable($startedAt, new \DateTimeZone('UTC'));
+        $now     = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        if ($now->getTimestamp() < $started->getTimestamp() + $duration) {
+            return false;
+        }
+        $this->finalizeGame($gameId);
+        return true;
+    }
+
+    private function finalizeGame(int $gameId): void
+    {
+        $this->pdo->beginTransaction();
+        try {
+            $stmt = $this->pdo->prepare('SELECT id, status FROM games WHERE id = ? FOR UPDATE');
+            $stmt->execute([$gameId]);
+            $g = $stmt->fetch();
+            if ($g === false || $g['status'] !== 'in_progress') {
+                $this->pdo->rollBack();
+                return;
+            }
+
+            $scores = $this->computeScores($gameId);
+
+            $updateTeam   = $this->pdo->prepare('UPDATE game_teams SET final_score = ? WHERE id = ?');
+            $updateTicket = $this->pdo->prepare('UPDATE game_team_tickets SET completed = ? WHERE id = ?');
+            foreach ($scores as $teamId => $s) {
+                $updateTeam->execute([$s['total'], $teamId]);
+                foreach ($s['tickets'] as $t) {
+                    $updateTicket->execute([$t['completed'] ? 1 : 0, $t['id']]);
+                }
+            }
+
+            $this->pdo->prepare(
+                "UPDATE games SET status = 'ended', ended_at = UTC_TIMESTAMP(3) WHERE id = ?"
+            )->execute([$gameId]);
+
+            $this->pdo->prepare(
+                "INSERT INTO game_events (game_id, kind, payload_json) VALUES (?, 'end', ?)"
+            )->execute([$gameId, json_encode(['team_count' => count($scores)], JSON_THROW_ON_ERROR)]);
+
+            $this->pdo->commit();
+        } catch (\Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Returns: [team_id => [
+     *   'route_points', 'ticket_points', 'ticket_penalties',
+     *   'longest_route_length', 'longest_bonus', 'total',
+     *   'tickets' => [['id', 'from_stop_id', 'to_stop_id', 'points', 'is_long_route', 'completed'], ...]
+     * ]]
+     */
+    private function computeScores(int $gameId): array
+    {
+        $stmt = $this->pdo->prepare('SELECT id FROM game_teams WHERE game_id = ?');
+        $stmt->execute([$gameId]);
+        $teamIds = array_map('intval', array_column($stmt->fetchAll(), 'id'));
+
+        $stmt = $this->pdo->prepare(
+            'SELECT c.team_id, r.length, r.from_stop_id, r.to_stop_id
+               FROM game_claims c
+               JOIN map_routes  r ON r.id = c.route_id
+              WHERE c.game_id = ?'
+        );
+        $stmt->execute([$gameId]);
+        $claimsByTeam = [];
+        foreach ($stmt->fetchAll() as $c) {
+            $claimsByTeam[(int) $c['team_id']][] = [
+                'length'  => (int) $c['length'],
+                'from'    => (int) $c['from_stop_id'],
+                'to'      => (int) $c['to_stop_id'],
+            ];
+        }
+
+        $stmt = $this->pdo->prepare(
+            "SELECT gtt.id, gtt.team_id, mt.from_stop_id, mt.to_stop_id, mt.points, mt.is_long_route
+               FROM game_team_tickets gtt
+               JOIN game_teams        gt ON gt.id = gtt.team_id
+               JOIN map_tickets       mt ON mt.id = gtt.ticket_id
+              WHERE gt.game_id = ? AND gtt.status = 'kept'"
+        );
+        $stmt->execute([$gameId]);
+        $ticketsByTeam = [];
+        foreach ($stmt->fetchAll() as $t) {
+            $ticketsByTeam[(int) $t['team_id']][] = $t;
+        }
+
+        $perTeam = [];
+        $longestPerTeam = [];
+        foreach ($teamIds as $tid) {
+            $teamClaims = $claimsByTeam[$tid] ?? [];
+
+            $routePoints = 0;
+            foreach ($teamClaims as $c) {
+                $routePoints += self::ROUTE_POINTS[$c['length']] ?? 0;
+            }
+
+            // Connectivity for tickets via union-find.
+            $parent = [];
+            $find = function (int $x) use (&$parent, &$find): int {
+                if (!isset($parent[$x])) $parent[$x] = $x;
+                if ($parent[$x] === $x) return $x;
+                return $parent[$x] = $find($parent[$x]);
+            };
+            $union = function (int $a, int $b) use (&$parent, $find) {
+                $ra = $find($a); $rb = $find($b);
+                if ($ra !== $rb) $parent[$ra] = $rb;
+            };
+            foreach ($teamClaims as $c) {
+                $union($c['from'], $c['to']);
+            }
+
+            $ticketPoints = 0;
+            $ticketPenalties = 0;
+            $ticketResults = [];
+            foreach ($ticketsByTeam[$tid] ?? [] as $t) {
+                $a = (int) $t['from_stop_id'];
+                $b = (int) $t['to_stop_id'];
+                $completed = isset($parent[$a], $parent[$b]) && $find($a) === $find($b);
+                if ($completed) {
+                    $ticketPoints += (int) $t['points'];
+                } else {
+                    $ticketPenalties += (int) $t['points'];
+                }
+                $ticketResults[] = [
+                    'id'            => (int) $t['id'],
+                    'from_stop_id'  => $a,
+                    'to_stop_id'    => $b,
+                    'points'        => (int) $t['points'],
+                    'is_long_route' => (bool) $t['is_long_route'],
+                    'completed'     => $completed,
+                ];
+            }
+
+            $longest = $this->longestSimplePath($teamClaims);
+            $longestPerTeam[$tid] = $longest;
+
+            $perTeam[$tid] = [
+                'route_points'         => $routePoints,
+                'ticket_points'        => $ticketPoints,
+                'ticket_penalties'     => $ticketPenalties,
+                'longest_route_length' => $longest,
+                'longest_bonus'        => 0,
+                'tickets'              => $ticketResults,
+            ];
+        }
+
+        $maxLongest = !empty($longestPerTeam) ? max($longestPerTeam) : 0;
+        if ($maxLongest > 0) {
+            foreach ($longestPerTeam as $tid => $len) {
+                if ($len === $maxLongest) {
+                    $perTeam[$tid]['longest_bonus'] = self::LONGEST_ROUTE_BONUS;
+                }
+            }
+        }
+
+        foreach ($perTeam as $tid => &$s) {
+            $s['total'] = $s['route_points'] + $s['ticket_points'] - $s['ticket_penalties'] + $s['longest_bonus'];
+        }
+        unset($s);
+
+        return $perTeam;
+    }
+
+    /**
+     * Longest sum of edge lengths in a walk that uses each edge at most once
+     * (nodes may repeat — classic TtR longest-path rule). Brute-force DFS;
+     * fine for the small route counts at play here.
+     */
+    private function longestSimplePath(array $edges): int
+    {
+        if (empty($edges)) return 0;
+        $adj = [];   // node => [['to' => N, 'len' => L, 'idx' => i]]
+        foreach ($edges as $i => $e) {
+            $adj[$e['from']][] = ['to' => $e['to'],   'len' => $e['length'], 'idx' => $i];
+            $adj[$e['to']][]   = ['to' => $e['from'], 'len' => $e['length'], 'idx' => $i];
+        }
+        $best = 0;
+        $used = [];
+        $dfs = function (int $node, int $acc) use (&$dfs, &$adj, &$used, &$best) {
+            if ($acc > $best) $best = $acc;
+            foreach ($adj[$node] as $e) {
+                if (isset($used[$e['idx']])) continue;
+                $used[$e['idx']] = true;
+                $dfs($e['to'], $acc + $e['len']);
+                unset($used[$e['idx']]);
+            }
+        };
+        foreach (array_keys($adj) as $start) {
+            $dfs($start, 0);
+        }
+        return $best;
+    }
+
+    private function buildScoreboard(int $gameId): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT id, name, color_index, final_score
+               FROM game_teams WHERE game_id = ?'
+        );
+        $stmt->execute([$gameId]);
+        $teamMeta = [];
+        foreach ($stmt->fetchAll() as $t) {
+            $teamMeta[(int) $t['id']] = [
+                'name'        => $t['name'],
+                'color_index' => (int) $t['color_index'],
+                'final_score' => $t['final_score'] !== null ? (int) $t['final_score'] : null,
+            ];
+        }
+
+        $scores = $this->computeScores($gameId);
+        $teams = [];
+        foreach ($scores as $teamId => $s) {
+            $meta = $teamMeta[$teamId] ?? ['name' => 'Team', 'color_index' => 0];
+            $teams[] = [
+                'id'                   => $teamId,
+                'name'                 => $meta['name'],
+                'color_index'          => $meta['color_index'],
+                'route_points'         => $s['route_points'],
+                'ticket_points'        => $s['ticket_points'],
+                'ticket_penalties'     => $s['ticket_penalties'],
+                'longest_route_length' => $s['longest_route_length'],
+                'longest_bonus'        => $s['longest_bonus'],
+                'total'                => $s['total'],
+                'tickets'              => $s['tickets'],
+            ];
+        }
+
+        usort($teams, fn(array $a, array $b) => $b['total'] <=> $a['total']);
+        return ['teams' => $teams];
     }
 
     private static function error(string $code, string $message, int $status): Response

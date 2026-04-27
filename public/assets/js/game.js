@@ -16,6 +16,9 @@ const btnDrawCards = document.getElementById('btn-draw-cards');
 const btnDrawTickets = document.getElementById('btn-draw-tickets');
 const btnTrade32 = document.getElementById('btn-trade-3-2');
 const btnTrade3Loco = document.getElementById('btn-trade-3-loco');
+const gameContainerEl = document.getElementById('game-container');
+const scoreboardEl = document.getElementById('scoreboard');
+const scoreboardListEl = document.getElementById('scoreboard-list');
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -472,6 +475,87 @@ function renderState(state) {
     renderTickets(state);
     renderWindows(state);
     applyClaims(state.claims || []);
+    if (state.game.status === 'ended') {
+        showScoreboard(state);
+    }
+}
+
+function showScoreboard(state) {
+    if (!state.final) return;
+    gameContainerEl.hidden = true;
+    scoreboardEl.hidden = false;
+    scoreboardListEl.replaceChildren();
+    state.final.teams.forEach((team, idx) => {
+        scoreboardListEl.appendChild(renderScoreboardTeam(team, idx + 1));
+    });
+}
+
+function renderScoreboardTeam(team, rank) {
+    const li = document.createElement('li');
+    li.className = `scoreboard-team rank-${rank}`;
+
+    const head = document.createElement('div');
+    head.className = 'scoreboard-head';
+    const rankEl = document.createElement('span');
+    rankEl.className = 'scoreboard-rank';
+    rankEl.textContent = `#${rank}`;
+    const swatch = document.createElement('span');
+    swatch.className = 'scoreboard-swatch';
+    swatch.style.background = TEAM_COLORS[team.color_index] || '#888';
+    const name = document.createElement('span');
+    name.className = 'scoreboard-name';
+    name.textContent = team.name;
+    const total = document.createElement('span');
+    total.className = 'scoreboard-total';
+    total.textContent = String(team.total);
+    head.append(rankEl, swatch, name, total);
+    li.appendChild(head);
+
+    const dl = document.createElement('dl');
+    dl.className = 'scoreboard-breakdown';
+    addBreakdownRow(dl, 'Route points', `+${team.route_points}`);
+    addBreakdownRow(dl, 'Ticket points', `+${team.ticket_points}`);
+    if (team.ticket_penalties > 0) {
+        addBreakdownRow(dl, 'Ticket penalties', `−${team.ticket_penalties}`);
+    }
+    const longestLabel = team.longest_bonus > 0
+        ? `Longest route (${team.longest_route_length})`
+        : `Longest route (${team.longest_route_length})`;
+    addBreakdownRow(dl, longestLabel, team.longest_bonus > 0 ? `+${team.longest_bonus}` : '—');
+    li.appendChild(dl);
+
+    if (team.tickets && team.tickets.length > 0) {
+        const ul = document.createElement('ul');
+        ul.className = 'scoreboard-tickets';
+        for (const t of team.tickets) {
+            const tli = document.createElement('li');
+            tli.className = 'scoreboard-ticket' + (t.completed ? ' completed' : ' failed');
+            const route = document.createElement('span');
+            route.textContent = `${stopName(t.from_stop_id)} → ${stopName(t.to_stop_id)}`;
+            if (t.is_long_route) {
+                const badge = document.createElement('span');
+                badge.className = 'badge';
+                badge.textContent = 'long';
+                route.append(' ', badge);
+            }
+            const pts = document.createElement('span');
+            pts.className = 'scoreboard-ticket-points';
+            pts.textContent = t.completed ? `+${t.points}` : `−${t.points}`;
+            tli.append(route, pts);
+            ul.appendChild(tli);
+        }
+        li.appendChild(ul);
+    }
+
+    return li;
+}
+
+function addBreakdownRow(dl, label, value) {
+    const dt = document.createElement('dt');
+    dt.textContent = label;
+    const dd = document.createElement('dd');
+    dd.textContent = value;
+    dl.append(dt, dd);
 }
 
 function renderWindows(state) {
@@ -1036,6 +1120,7 @@ function tickCountdown() {
 async function pollState() {
     const state = await fetchState();
     if (state) renderState(state);
+    if (state && state.game && state.game.status === 'ended') return;
     setTimeout(pollState, POLL_INTERVAL_MS);
 }
 

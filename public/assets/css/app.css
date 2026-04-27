@@ -658,6 +658,130 @@ button:disabled {
     vertical-align: middle;
 }
 
+/* Scoreboard -------------------------------------------------------- */
+
+.scoreboard-container {
+    padding-top: 24px;
+}
+
+.scoreboard-title {
+    margin: 0 0 4px;
+    font-size: 1.75rem;
+}
+
+.scoreboard-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.scoreboard-team {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.scoreboard-team.rank-1 {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+.scoreboard-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.scoreboard-rank {
+    font-size: 1.5rem;
+    font-weight: 700;
+    min-width: 1.5em;
+    color: var(--ink-soft);
+}
+
+.scoreboard-team.rank-1 .scoreboard-rank { color: var(--accent); }
+
+.scoreboard-swatch {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.scoreboard-name {
+    flex: 1;
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.scoreboard-total {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--accent);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.scoreboard-breakdown {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 4px 12px;
+    font-size: 0.9rem;
+    margin: 0;
+}
+
+.scoreboard-breakdown dt { color: var(--ink-soft); }
+
+.scoreboard-breakdown dd {
+    margin: 0;
+    text-align: right;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.scoreboard-tickets {
+    list-style: none;
+    margin: 0;
+    padding: 8px 0 0;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.scoreboard-ticket {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 0.85rem;
+}
+
+.scoreboard-ticket.failed { color: var(--error); }
+
+.scoreboard-ticket-points { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+.scoreboard-actions {
+    display: flex;
+    justify-content: center;
+}
+
+.home-link {
+    display: inline-block;
+    background: var(--accent);
+    color: var(--accent-ink);
+    text-decoration: none;
+    border-radius: 8px;
+    padding: 12px 24px;
+    font-weight: 600;
+    min-height: 44px;
+    line-height: 1.6;
+}
+
 /* Log --------------------------------------------------------------- */
 
 .log-list {
