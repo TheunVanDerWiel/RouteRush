@@ -401,7 +401,7 @@ function renderRoute(route, stopsById, colorsById, perpOffset) {
     const labelFlip = angleDeg > 90 || angleDeg < -90;
     const color = colorsById.get(route.color_id);
     const fill = color ? color.hex : '#888';
-    const labelText = color ? color.display_name : '';
+    const labelText = color ? color.symbol : '';
 
     const g = document.createElementNS(SVG_NS, 'g');
     g.setAttribute('class', 'route');
