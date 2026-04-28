@@ -568,9 +568,9 @@ function handleAddRouteClick(target) {
         render();
         return;
     }
-    addRouteBetween(state.addRouteFrom, target.id);
+    const newId = addRouteBetween(state.addRouteFrom, target.id);
     state.addRouteFrom = null;
-    setMode('select');
+    state.selection = { kind: 'route', id: newId };
     render();
 }
 
@@ -588,6 +588,7 @@ function addRouteBetween(fromId, toId) {
         parallel_index: nextParallelIndex(fromId, toId),
     });
     markDirty();
+    return id;
 }
 
 function ensureDefaultColor() {
@@ -668,7 +669,7 @@ function addStopAt(pt) {
         y: Math.round(pt.y),
     });
     markDirty();
-    setMode('select');
+    state.selection = { kind: 'stop', id };
     render();
 }
 
