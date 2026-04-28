@@ -442,8 +442,72 @@ function onCanvasClick(e, svg) {
         case 'move':
             handleMoveClick(pt);
             break;
-        // other modes ship in subsequent slices
+        case 'delete':
+            handleDeleteClick(target);
+            break;
     }
+}
+
+function handleDeleteClick(target) {
+    if (target.kind === 'stop') {
+        deleteStop(target.id);
+    } else if (target.kind === 'route') {
+        deleteRoute(target.id);
+    }
+}
+
+function deleteStop(stopId) {
+    const stop = state.data.stops.find((s) => s.id === stopId);
+    if (!stop) return;
+    const affectedRoutes  = state.data.routes.filter(
+        (r) => r.from_stop_id === stopId || r.to_stop_id === stopId,
+    );
+    const affectedTickets = state.data.tickets.filter(
+        (t) => t.from_stop_id === stopId || t.to_stop_id === stopId,
+    );
+
+    let msg = `Delete stop "${stop.display_name}"?`;
+    const parts = [];
+    if (affectedRoutes.length > 0) {
+        const n = affectedRoutes.length;
+        parts.push(`${n} connected route${n === 1 ? '' : 's'}`);
+    }
+    if (affectedTickets.length > 0) {
+        const n = affectedTickets.length;
+        parts.push(`${n} ticket${n === 1 ? '' : 's'}`);
+    }
+    if (parts.length > 0) {
+        msg += `\n\nThis will also delete: ${parts.join(' and ')}.`;
+    }
+    if (!confirm(msg)) return;
+
+    const removedRouteIds = new Set(affectedRoutes.map((r) => r.id));
+    state.data.stops   = state.data.stops.filter((s) => s.id !== stopId);
+    state.data.routes  = state.data.routes.filter((r) => !removedRouteIds.has(r.id));
+    state.data.tickets = state.data.tickets.filter(
+        (t) => t.from_stop_id !== stopId && t.to_stop_id !== stopId,
+    );
+
+    if (state.selection) {
+        if (state.selection.kind === 'stop' && state.selection.id === stopId) {
+            state.selection = null;
+        } else if (state.selection.kind === 'route' && removedRouteIds.has(state.selection.id)) {
+            state.selection = null;
+        }
+    }
+
+    markDirty();
+    render();
+}
+
+function deleteRoute(routeId) {
+    if (!state.data.routes.some((r) => r.id === routeId)) return;
+    state.data.routes = state.data.routes.filter((r) => r.id !== routeId);
+    if (state.selection && state.selection.kind === 'route' && state.selection.id === routeId) {
+        state.selection = null;
+    }
+    markDirty();
+    render();
 }
 
 function handleMoveClick(pt) {
