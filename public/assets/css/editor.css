@@ -209,8 +209,9 @@ body.editor-body {
 .props-row {
     display: flex;
     justify-content: space-between;
+    align-items: center;
     gap: 8px;
-    padding: 4px 0;
+    padding: 6px 0;
     border-bottom: 1px solid var(--ed-border);
     font-size: 0.85rem;
 }
@@ -219,11 +220,89 @@ body.editor-body {
 
 .props-label {
     color: var(--ed-ink-soft);
+    flex-shrink: 0;
 }
 
 .props-value {
     font-weight: 600;
     text-align: right;
+}
+
+.props-input {
+    flex: 1;
+    min-width: 0;
+    max-width: 14em;
+    padding: 4px 6px;
+    border: 1px solid var(--ed-border);
+    border-radius: 6px;
+    font: inherit;
+    color: var(--ed-ink);
+    background: var(--ed-surface);
+    text-align: right;
+}
+
+.props-input.props-number {
+    flex: 0 0 auto;
+    width: 6em;
+    max-width: none;
+}
+
+select.props-input {
+    text-align: left;
+}
+
+.props-via {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+}
+
+.props-mini-btn {
+    appearance: none;
+    border: 1px solid var(--ed-border);
+    background: var(--ed-surface);
+    color: var(--ed-ink);
+    padding: 2px 8px;
+    font-size: 0.75rem;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.props-mini-btn:hover {
+    background: var(--ed-bg);
+}
+
+.props-actions {
+    display: flex;
+    gap: 8px;
+    padding-top: 12px;
+    margin-top: 4px;
+    border-top: 1px solid var(--ed-border);
+}
+
+.props-btn {
+    appearance: none;
+    border: 1px solid var(--ed-border);
+    background: var(--ed-surface);
+    color: var(--ed-ink);
+    padding: 6px 12px;
+    font-size: 0.85rem;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.props-btn:hover {
+    background: var(--ed-bg);
+}
+
+.props-btn.danger {
+    border-color: var(--ed-error);
+    color: var(--ed-error);
+}
+
+.props-btn.danger:hover {
+    background: #fef2f2;
 }
 
 .hint {

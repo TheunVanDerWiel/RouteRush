@@ -165,10 +165,7 @@ function renderProperties() {
             panel.appendChild(hintP('Nothing selected.'));
             return;
         }
-        panel.appendChild(propsHeader(`Stop #${stop.id}`));
-        panel.appendChild(propRow('Name', stop.display_name));
-        panel.appendChild(propRow('X', String(stop.x)));
-        panel.appendChild(propRow('Y', String(stop.y)));
+        renderStopProps(panel, stop);
         return;
     }
 
@@ -179,26 +176,69 @@ function renderProperties() {
             panel.appendChild(hintP('Nothing selected.'));
             return;
         }
-        const from  = state.data.stops.find((s) => s.id === route.from_stop_id);
-        const to    = state.data.stops.find((s) => s.id === route.to_stop_id);
-        const color = state.data.colors.find((c) => c.id === route.color_id);
-        const fromName = from ? from.display_name : `#${route.from_stop_id}`;
-        const toName   = to   ? to.display_name   : `#${route.to_stop_id}`;
-        const colorName = color ? color.display_name : `#${route.color_id}`;
-
-        panel.appendChild(propsHeader(`Route #${route.id}`));
-        panel.appendChild(propRow('From',           fromName));
-        panel.appendChild(propRow('To',             toName));
-        panel.appendChild(propRow('Length',         String(route.length)));
-        panel.appendChild(propRow('Color',          colorName));
-        panel.appendChild(propRow('Parallel index', String(route.parallel_index)));
-        panel.appendChild(propRow(
-            'Via',
-            (route.via_x !== null && route.via_y !== null)
-                ? `(${route.via_x}, ${route.via_y})`
-                : '—',
-        ));
+        renderRouteProps(panel, route);
     }
+}
+
+function renderStopProps(panel, stop) {
+    panel.appendChild(propsHeader(`Stop #${stop.id}`));
+    panel.appendChild(propTextRow('Name', stop.display_name, (v) => {
+        stop.display_name = v;
+        markDirty();
+        renderCanvas();
+    }));
+    panel.appendChild(propNumberRow('X', stop.x, (v) => {
+        stop.x = v;
+        markDirty();
+        renderCanvas();
+    }));
+    panel.appendChild(propNumberRow('Y', stop.y, (v) => {
+        stop.y = v;
+        markDirty();
+        renderCanvas();
+    }));
+    panel.appendChild(propActions([
+        { label: 'Delete stop', danger: true, onClick: () => deleteStop(stop.id) },
+    ]));
+}
+
+function renderRouteProps(panel, route) {
+    const from = state.data.stops.find((s) => s.id === route.from_stop_id);
+    const to   = state.data.stops.find((s) => s.id === route.to_stop_id);
+    const fromName = from ? from.display_name : `#${route.from_stop_id}`;
+    const toName   = to   ? to.display_name   : `#${route.to_stop_id}`;
+
+    panel.appendChild(propsHeader(`Route #${route.id}`));
+    panel.appendChild(propRow('From', fromName));
+    panel.appendChild(propRow('To',   toName));
+    panel.appendChild(propNumberRow('Length', route.length, (v) => {
+        route.length = v;
+        markDirty();
+        renderCanvas();
+    }, { min: 1, max: 6 }));
+
+    const colorOpts = state.data.colors.map((c) => ({
+        value: String(c.id),
+        label: c.display_name,
+    }));
+    if (colorOpts.length === 0) {
+        // Defensive: routes can't exist without a color, but guard anyway.
+        panel.appendChild(propRow('Color', `#${route.color_id}`));
+    } else {
+        panel.appendChild(propSelectRow('Color', String(route.color_id), colorOpts, (v) => {
+            const id = parseInt(v, 10);
+            if (!isNaN(id)) {
+                route.color_id = id;
+                markDirty();
+                renderCanvas();
+            }
+        }));
+    }
+    panel.appendChild(propRow('Parallel index', String(route.parallel_index)));
+    panel.appendChild(propViaRow(route));
+    panel.appendChild(propActions([
+        { label: 'Delete route', danger: true, onClick: () => deleteRoute(route.id) },
+    ]));
 }
 
 function hintP(text) {
@@ -218,14 +258,125 @@ function propsHeader(text) {
 function propRow(label, value) {
     const row = document.createElement('div');
     row.className = 'props-row';
+    row.append(propLabel(label), propValueSpan(value));
+    return row;
+}
+
+function propTextRow(label, value, onChange) {
+    const row = document.createElement('div');
+    row.className = 'props-row';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = value;
+    input.className = 'props-input';
+    input.addEventListener('input', () => onChange(input.value));
+    row.append(propLabel(label), input);
+    return row;
+}
+
+function propNumberRow(label, value, onChange, opts = {}) {
+    const row = document.createElement('div');
+    row.className = 'props-row';
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.step = '1';
+    input.value = String(value);
+    input.className = 'props-input props-number';
+    if (opts.min !== undefined) input.min = String(opts.min);
+    if (opts.max !== undefined) input.max = String(opts.max);
+
+    input.addEventListener('input', () => {
+        let n = parseInt(input.value, 10);
+        if (isNaN(n)) return;
+        if (opts.min !== undefined && n < opts.min) n = opts.min;
+        if (opts.max !== undefined && n > opts.max) n = opts.max;
+        onChange(n);
+    });
+    input.addEventListener('blur', () => {
+        let n = parseInt(input.value, 10);
+        if (isNaN(n)) n = opts.min ?? 0;
+        if (opts.min !== undefined && n < opts.min) n = opts.min;
+        if (opts.max !== undefined && n > opts.max) n = opts.max;
+        if (input.value !== String(n)) input.value = String(n);
+        onChange(n);
+    });
+
+    row.append(propLabel(label), input);
+    return row;
+}
+
+function propSelectRow(label, value, options, onChange) {
+    const row = document.createElement('div');
+    row.className = 'props-row';
+    const sel = document.createElement('select');
+    sel.className = 'props-input';
+    for (const opt of options) {
+        const o = document.createElement('option');
+        o.value = opt.value;
+        o.textContent = opt.label;
+        sel.appendChild(o);
+    }
+    sel.value = value;
+    sel.addEventListener('change', () => onChange(sel.value));
+    row.append(propLabel(label), sel);
+    return row;
+}
+
+function propViaRow(route) {
+    const row = document.createElement('div');
+    row.className = 'props-row';
+    const wrap = document.createElement('span');
+    wrap.className = 'props-via';
+    if (route.via_x !== null && route.via_y !== null) {
+        const text = document.createElement('span');
+        text.textContent = `(${route.via_x}, ${route.via_y})`;
+        wrap.appendChild(text);
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'props-mini-btn';
+        btn.textContent = 'Clear';
+        btn.addEventListener('click', () => {
+            route.via_x = null;
+            route.via_y = null;
+            markDirty();
+            renderCanvas();
+            renderProperties();
+        });
+        wrap.appendChild(btn);
+    } else {
+        wrap.textContent = '—';
+    }
+    row.append(propLabel('Via'), wrap);
+    return row;
+}
+
+function propActions(actions) {
+    const row = document.createElement('div');
+    row.className = 'props-actions';
+    for (const a of actions) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = a.label;
+        btn.className = a.danger ? 'props-btn danger' : 'props-btn';
+        btn.addEventListener('click', a.onClick);
+        row.appendChild(btn);
+    }
+    return row;
+}
+
+function propLabel(text) {
     const l = document.createElement('span');
     l.className = 'props-label';
-    l.textContent = label;
+    l.textContent = text;
+    return l;
+}
+
+function propValueSpan(text) {
     const v = document.createElement('span');
     v.className = 'props-value';
-    v.textContent = value;
-    row.append(l, v);
-    return row;
+    v.textContent = text;
+    return v;
 }
 
 function renderCanvas() {
