@@ -51,4 +51,9 @@ final class HomeController
             'player_id' => $_SESSION['player_id'] ?? null,
         ]));
     }
+
+    public function editor(): Response
+    {
+        return Response::html(View::render('editor', []));
+    }
 }
