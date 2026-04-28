@@ -189,7 +189,7 @@ final class GameController
         $code = strtoupper($code);
         $stmt = $this->pdo->prepare(
             'SELECT g.id, g.status, g.host_player_id, g.duration_seconds, g.map_id,
-                    m.starting_train_cards, m.min_teams
+                    m.starting_train_cards, m.starting_tickets_count, m.min_teams
                FROM games g
                JOIN maps  m ON m.id = g.map_id
               WHERE g.room_code = ?'
@@ -206,11 +206,12 @@ final class GameController
             return self::error('already_started', 'Game has already started', 409);
         }
 
-        $gameId        = (int) $game['id'];
-        $mapId         = (int) $game['map_id'];
-        $startingCards = (int) $game['starting_train_cards'];
-        $minTeams      = (int) $game['min_teams'];
-        $duration      = (int) $game['duration_seconds'];
+        $gameId            = (int) $game['id'];
+        $mapId             = (int) $game['map_id'];
+        $startingCards     = (int) $game['starting_train_cards'];
+        $startingRegulars  = (int) $game['starting_tickets_count'];
+        $minTeams          = (int) $game['min_teams'];
+        $duration          = (int) $game['duration_seconds'];
 
         $stmt = $this->pdo->prepare('SELECT id FROM game_teams WHERE game_id = ? ORDER BY joined_at');
         $stmt->execute([$gameId]);
@@ -310,7 +311,8 @@ final class GameController
                   WHERE id = ?'
             )->execute([$totalLoco, $totalCardsNeeded, $gameId]);
 
-            // Deal tickets: 1 long + 3 regular per team, no duplicates across teams.
+            // Deal tickets: 1 long + N regular per team (N = map.starting_tickets_count),
+            // no duplicates across teams.
             $stmt = $this->pdo->prepare('SELECT id FROM map_tickets WHERE map_id = ? AND is_long_route = TRUE');
             $stmt->execute([$mapId]);
             $longIds = array_map('intval', array_column($stmt->fetchAll(), 'id'));
@@ -320,7 +322,7 @@ final class GameController
             $regularIds = array_map('intval', array_column($stmt->fetchAll(), 'id'));
 
             $teamCount = count($teamIds);
-            if (count($longIds) < $teamCount || count($regularIds) < $teamCount * 3) {
+            if (count($longIds) < $teamCount || count($regularIds) < $teamCount * $startingRegulars) {
                 $this->pdo->rollBack();
                 return self::error('ticket_pool_too_small', 'Map does not have enough tickets for this many teams', 500);
             }
@@ -333,7 +335,7 @@ final class GameController
             );
             foreach ($teamIds as $tid) {
                 $insertTicket->execute([$tid, array_pop($longIds)]);
-                for ($i = 0; $i < 3; $i++) {
+                for ($i = 0; $i < $startingRegulars; $i++) {
                     $insertTicket->execute([$tid, array_pop($regularIds)]);
                 }
             }
@@ -375,6 +377,7 @@ final class GameController
 
         $stmt = $this->pdo->prepare(
             'SELECT m.id, m.name, m.viewbox_w, m.viewbox_h, m.starting_train_cards,
+                    m.starting_tickets_count, m.starting_tickets_keep_min,
                     m.min_teams, m.max_teams, m.locomotives_count
                FROM games g
                JOIN maps  m ON m.id = g.map_id
@@ -431,17 +434,19 @@ final class GameController
         ], $stmt->fetchAll());
 
         return Response::json([
-            'id'                   => $mapId,
-            'name'                 => $map['name'],
-            'viewbox_w'            => (int) $map['viewbox_w'],
-            'viewbox_h'            => (int) $map['viewbox_h'],
-            'starting_train_cards' => (int) $map['starting_train_cards'],
-            'min_teams'            => (int) $map['min_teams'],
-            'max_teams'            => (int) $map['max_teams'],
-            'locomotives_count'    => (int) $map['locomotives_count'],
-            'colors'               => $colors,
-            'stops'                => $stops,
-            'routes'               => $routes,
+            'id'                        => $mapId,
+            'name'                      => $map['name'],
+            'viewbox_w'                 => (int) $map['viewbox_w'],
+            'viewbox_h'                 => (int) $map['viewbox_h'],
+            'starting_train_cards'      => (int) $map['starting_train_cards'],
+            'starting_tickets_count'    => (int) $map['starting_tickets_count'],
+            'starting_tickets_keep_min' => (int) $map['starting_tickets_keep_min'],
+            'min_teams'                 => (int) $map['min_teams'],
+            'max_teams'                 => (int) $map['max_teams'],
+            'locomotives_count'         => (int) $map['locomotives_count'],
+            'colors'                    => $colors,
+            'stops'                     => $stops,
+            'routes'                    => $routes,
         ]);
     }
 
@@ -456,8 +461,10 @@ final class GameController
 
         $stmt = $this->pdo->prepare(
             'SELECT g.id, g.status, g.duration_seconds, g.started_at, g.deck_counter, g.locomotives_remaining,
+                    m.starting_tickets_keep_min,
                     p.team_id
                FROM games g
+               JOIN maps         m ON m.id = g.map_id
                JOIN game_players p ON p.team_id IN (SELECT id FROM game_teams WHERE game_id = g.id)
               WHERE g.room_code = ? AND p.id = ?'
         );
@@ -553,6 +560,14 @@ final class GameController
             }
         }
 
+        // Minimum number of pending tickets the team must keep right now.
+        // Starting batch (no kept yet) uses the map's configured floor;
+        // mid-game draws always require keeping at least one.
+        $isStartingDecision = count($tickets) === 0;
+        $ticketsMinKeep     = $isStartingDecision
+            ? (int) $row['starting_tickets_keep_min']
+            : 1;
+
         $response = [
             'mode' => 'snapshot',
             'game' => [
@@ -570,6 +585,7 @@ final class GameController
                 'next_window_in_seconds' => $nextWindowInSeconds,
                 'tickets'                => $tickets,
                 'pending_tickets'        => $pending,
+                'tickets_min_keep'       => $ticketsMinKeep,
             ],
             'claims' => $claims,
         ];
@@ -1314,10 +1330,12 @@ final class GameController
         $this->pdo->beginTransaction();
         try {
             $stmt = $this->pdo->prepare(
-                'SELECT g.id AS game_id, g.status, t.id AS team_id
+                'SELECT g.id AS game_id, g.status, t.id AS team_id,
+                        m.starting_tickets_keep_min
                    FROM games g
                    JOIN game_players p ON p.id = ?
                    JOIN game_teams   t ON t.id = p.team_id AND t.game_id = g.id
+                   JOIN maps         m ON m.id = g.map_id
                   WHERE g.room_code = ?
                     FOR UPDATE'
             );
@@ -1332,8 +1350,9 @@ final class GameController
                 return self::error('game_not_in_progress', 'Game is not in progress', 409);
             }
 
-            $gameId = (int) $row['game_id'];
-            $teamId = (int) $row['team_id'];
+            $gameId             = (int) $row['game_id'];
+            $teamId             = (int) $row['team_id'];
+            $startingKeepMin    = (int) $row['starting_tickets_keep_min'];
 
             $stmt = $this->pdo->prepare(
                 "SELECT ticket_id FROM game_team_tickets WHERE team_id = ? AND status = 'pending' FOR UPDATE"
@@ -1358,12 +1377,12 @@ final class GameController
             );
             $stmt->execute([$teamId]);
             $isStarting = $stmt->fetch() === false;
-            $minKeep    = $isStarting ? 2 : 1;
+            $minKeep    = $isStarting ? $startingKeepMin : 1;
 
             $keepCount = count($keepIds);
             if ($keepCount < $minKeep) {
                 $this->pdo->rollBack();
-                $errCode = $isStarting ? 'must_keep_two' : 'must_keep_one';
+                $errCode = $isStarting ? 'must_keep_min' : 'must_keep_one';
                 return self::error($errCode, "Must keep at least $minKeep ticket(s)", 422);
             }
 

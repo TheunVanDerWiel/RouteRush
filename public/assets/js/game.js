@@ -784,8 +784,9 @@ function renderTickets(state) {
     }
 
     ticketsPendingEl.hidden = false;
-    const isStarting = kept.length === 0;
-    const minKeep = isStarting ? 2 : 1;
+    const minKeep = (typeof team.tickets_min_keep === 'number' && team.tickets_min_keep > 0)
+        ? team.tickets_min_keep
+        : (kept.length === 0 ? 2 : 1);
     ticketsMinKeepEl.textContent = String(minKeep);
 
     ticketsPendingListEl.replaceChildren();
