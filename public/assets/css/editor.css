@@ -200,6 +200,32 @@ body.editor-body {
     background: var(--ed-bg);
 }
 
+.props-header {
+    margin: 0 0 8px;
+    font-size: 0.95rem;
+    font-weight: 700;
+}
+
+.props-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--ed-border);
+    font-size: 0.85rem;
+}
+
+.props-row:last-child { border-bottom: none; }
+
+.props-label {
+    color: var(--ed-ink-soft);
+}
+
+.props-value {
+    font-weight: 600;
+    text-align: right;
+}
+
 .hint {
     margin: 0;
     color: var(--ed-ink-soft);
@@ -283,6 +309,17 @@ body.editor-body {
     fill: #ffd166;
     stroke: var(--ed-warn);
     stroke-width: 4;
+}
+
+.editor-stop.selected .editor-stop-circle {
+    fill: #cfe0ff;
+    stroke: var(--ed-accent);
+    stroke-width: 4;
+}
+
+.editor-route.selected .editor-route-slot {
+    stroke: var(--ed-accent);
+    stroke-width: 3;
 }
 
 .editor-stop-label {

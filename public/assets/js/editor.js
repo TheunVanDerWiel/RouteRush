@@ -77,6 +77,7 @@ const els = {
 
     banner:        document.getElementById('editor-banner'),
     canvas:        document.getElementById('editor-canvas'),
+    properties:    document.getElementById('properties-panel'),
 
     fileJson:      document.getElementById('file-input-json'),
     fileImage:     document.getElementById('file-input-image'),
@@ -117,6 +118,7 @@ function setBanner(message, kind = 'info') {
 function render() {
     renderMeta();
     renderCanvas();
+    renderProperties();
 }
 
 function renderMeta() {
@@ -145,6 +147,85 @@ function setIfChanged(input, value) {
     // Avoid clobbering the user's caret while they're typing.
     if (document.activeElement === input) return;
     if (input.value !== value) input.value = value;
+}
+
+function renderProperties() {
+    const panel = els.properties;
+    panel.replaceChildren();
+
+    if (!state.selection) {
+        panel.appendChild(hintP('Nothing selected.'));
+        return;
+    }
+
+    if (state.selection.kind === 'stop') {
+        const stop = state.data.stops.find((s) => s.id === state.selection.id);
+        if (!stop) {
+            state.selection = null;
+            panel.appendChild(hintP('Nothing selected.'));
+            return;
+        }
+        panel.appendChild(propsHeader(`Stop #${stop.id}`));
+        panel.appendChild(propRow('Name', stop.display_name));
+        panel.appendChild(propRow('X', String(stop.x)));
+        panel.appendChild(propRow('Y', String(stop.y)));
+        return;
+    }
+
+    if (state.selection.kind === 'route') {
+        const route = state.data.routes.find((r) => r.id === state.selection.id);
+        if (!route) {
+            state.selection = null;
+            panel.appendChild(hintP('Nothing selected.'));
+            return;
+        }
+        const from  = state.data.stops.find((s) => s.id === route.from_stop_id);
+        const to    = state.data.stops.find((s) => s.id === route.to_stop_id);
+        const color = state.data.colors.find((c) => c.id === route.color_id);
+        const fromName = from ? from.display_name : `#${route.from_stop_id}`;
+        const toName   = to   ? to.display_name   : `#${route.to_stop_id}`;
+        const colorName = color ? color.display_name : `#${route.color_id}`;
+
+        panel.appendChild(propsHeader(`Route #${route.id}`));
+        panel.appendChild(propRow('From',           fromName));
+        panel.appendChild(propRow('To',             toName));
+        panel.appendChild(propRow('Length',         String(route.length)));
+        panel.appendChild(propRow('Color',          colorName));
+        panel.appendChild(propRow('Parallel index', String(route.parallel_index)));
+        panel.appendChild(propRow(
+            'Via',
+            (route.via_x !== null && route.via_y !== null)
+                ? `(${route.via_x}, ${route.via_y})`
+                : '—',
+        ));
+    }
+}
+
+function hintP(text) {
+    const p = document.createElement('p');
+    p.className = 'hint';
+    p.textContent = text;
+    return p;
+}
+
+function propsHeader(text) {
+    const h = document.createElement('h3');
+    h.className = 'props-header';
+    h.textContent = text;
+    return h;
+}
+
+function propRow(label, value) {
+    const row = document.createElement('div');
+    row.className = 'props-row';
+    const l = document.createElement('span');
+    l.className = 'props-label';
+    l.textContent = label;
+    const v = document.createElement('span');
+    v.className = 'props-value';
+    v.textContent = value;
+    row.append(l, v);
+    return row;
 }
 
 function renderCanvas() {
@@ -218,7 +299,9 @@ function renderRoute(route, stopsById, colorsById, perpOffset) {
     const labelText = color ? color.symbol : '';
 
     const g = document.createElementNS(SVG_NS, 'g');
-    g.setAttribute('class', 'editor-route');
+    let cls = 'editor-route';
+    if (isSelected('route', route.id)) cls += ' selected';
+    g.setAttribute('class', cls);
     g.dataset.routeId = String(route.id);
     g.dataset.colorId = String(route.color_id);
 
@@ -314,6 +397,7 @@ function renderStop(stop) {
     const g = document.createElementNS(SVG_NS, 'g');
     let cls = 'editor-stop';
     if (state.addRouteFrom === stop.id) cls += ' route-from';
+    if (isSelected('stop', stop.id))   cls += ' selected';
     g.setAttribute('class', cls);
     g.setAttribute('transform', `translate(${stop.x} ${stop.y})`);
     g.dataset.stopId = String(stop.id);
@@ -344,6 +428,9 @@ function onCanvasClick(e, svg) {
     const pt = screenToSvg(svg, e.clientX, e.clientY);
 
     switch (state.mode) {
+        case 'select':
+            handleSelectClick(target);
+            break;
         case 'add-stop':
             if (target.kind !== 'stop') {
                 addStopAt(pt);
@@ -354,6 +441,21 @@ function onCanvasClick(e, svg) {
             break;
         // other modes ship in subsequent slices
     }
+}
+
+function handleSelectClick(target) {
+    if (target.kind === 'stop' || target.kind === 'route') {
+        state.selection = { kind: target.kind, id: target.id };
+    } else {
+        state.selection = null;
+    }
+    render();
+}
+
+function isSelected(kind, id) {
+    return state.selection !== null
+        && state.selection.kind === kind
+        && state.selection.id === id;
 }
 
 function handleAddRouteClick(target) {
