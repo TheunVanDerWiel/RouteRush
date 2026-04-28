@@ -618,7 +618,7 @@ function formatActivityTime(iso) {
 
 function showScoreboard(state) {
     if (!state.final) return;
-    gameContainerEl.hidden = true;
+    document.body.classList.add('game-over');
     scoreboardEl.hidden = false;
     scoreboardListEl.replaceChildren();
     state.final.teams.forEach((team, idx) => {

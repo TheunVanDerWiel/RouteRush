@@ -225,6 +225,15 @@ button:disabled {
     padding-top: 12px;
 }
 
+/* When the game is finished, hide everything except the map; the
+   scoreboard is rendered in its own container below. */
+.game-body.game-over .hand-card,
+.game-body.game-over .actions-card,
+.game-body.game-over .tickets-card,
+.game-body.game-over .log-card {
+    display: none;
+}
+
 /* Placeholders ------------------------------------------------------- */
 
 .placeholder {
