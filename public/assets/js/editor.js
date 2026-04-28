@@ -439,7 +439,33 @@ function onCanvasClick(e, svg) {
         case 'add-route':
             handleAddRouteClick(target);
             break;
+        case 'move':
+            handleMoveClick(pt);
+            break;
         // other modes ship in subsequent slices
+    }
+}
+
+function handleMoveClick(pt) {
+    if (!state.selection) return;
+    const x = Math.round(pt.x);
+    const y = Math.round(pt.y);
+    if (state.selection.kind === 'stop') {
+        const stop = state.data.stops.find((s) => s.id === state.selection.id);
+        if (!stop) return;
+        stop.x = x;
+        stop.y = y;
+        markDirty();
+        render();
+        return;
+    }
+    if (state.selection.kind === 'route') {
+        const route = state.data.routes.find((r) => r.id === state.selection.id);
+        if (!route) return;
+        route.via_x = x;
+        route.via_y = y;
+        markDirty();
+        render();
     }
 }
 
