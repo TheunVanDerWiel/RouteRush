@@ -226,6 +226,10 @@ body.editor-body {
     background: #ffffff;
 }
 
+.editor-grid {
+    pointer-events: none;
+}
+
 .editor-grid line {
     stroke: #e0e4ec;
     stroke-width: 1;
@@ -239,3 +243,33 @@ body.editor-body {
 .editor-bg-image {
     pointer-events: none;
 }
+
+/* ---------- Stops ---------- */
+
+.editor-stop {
+    cursor: pointer;
+}
+
+.editor-stop-circle {
+    fill: #ffffff;
+    stroke: var(--ed-ink);
+    stroke-width: 2;
+    vector-effect: non-scaling-stroke;
+}
+
+.editor-stop-label {
+    fill: var(--ed-ink);
+    paint-order: stroke;
+    stroke: #ffffff;
+    stroke-width: 4;
+    stroke-linejoin: round;
+    pointer-events: none;
+    font-weight: 600;
+}
+
+/* When add-route mode lands, this gets a different cursor on stops. */
+.editor-canvas svg { cursor: default; }
+.editor-body[data-mode="add-stop"] .editor-canvas svg { cursor: crosshair; }
+.editor-body[data-mode="add-route"] .editor-canvas svg { cursor: crosshair; }
+.editor-body[data-mode="delete"] .editor-canvas svg { cursor: not-allowed; }
+.editor-body[data-mode="move"] .editor-canvas svg { cursor: move; }

@@ -6,6 +6,10 @@
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
+const STOP_RADIUS = 10;
+const STOP_LABEL_OFFSET = 14;
+const STOP_LABEL_FONT_SIZE = 22;
+
 // ---------------------------------------------------------------------------
 // Default state
 // ---------------------------------------------------------------------------
@@ -153,9 +157,114 @@ function renderCanvas() {
 
     svg.appendChild(buildGrid(d.viewbox_w, d.viewbox_h));
 
-    // Future slices append routes / stops / overlays here.
+    const stopLayer = document.createElementNS(SVG_NS, 'g');
+    stopLayer.setAttribute('class', 'editor-stops');
+    for (const s of d.stops) stopLayer.appendChild(renderStop(s));
+    svg.appendChild(stopLayer);
 
+    attachCanvasHandlers(svg);
     els.canvas.replaceChildren(svg);
+}
+
+function renderStop(stop) {
+    const g = document.createElementNS(SVG_NS, 'g');
+    g.setAttribute('class', 'editor-stop');
+    g.setAttribute('transform', `translate(${stop.x} ${stop.y})`);
+    g.dataset.stopId = String(stop.id);
+
+    const c = document.createElementNS(SVG_NS, 'circle');
+    c.setAttribute('r', String(STOP_RADIUS));
+    c.setAttribute('class', 'editor-stop-circle');
+    g.appendChild(c);
+
+    const t = document.createElementNS(SVG_NS, 'text');
+    t.setAttribute('x', '0');
+    t.setAttribute('y', String(STOP_RADIUS + STOP_LABEL_OFFSET));
+    t.setAttribute('text-anchor', 'middle');
+    t.setAttribute('class', 'editor-stop-label');
+    t.style.fontSize = `${STOP_LABEL_FONT_SIZE}px`;
+    t.textContent = stop.display_name;
+    g.appendChild(t);
+
+    return g;
+}
+
+function attachCanvasHandlers(svg) {
+    svg.addEventListener('click', (e) => onCanvasClick(e, svg));
+}
+
+function onCanvasClick(e, svg) {
+    const target = findClickTarget(e.target);
+    const pt = screenToSvg(svg, e.clientX, e.clientY);
+
+    switch (state.mode) {
+        case 'add-stop':
+            if (target.kind !== 'stop') {
+                addStopAt(pt);
+            }
+            break;
+        // other modes ship in subsequent slices
+    }
+}
+
+function findClickTarget(node) {
+    let n = node;
+    while (n && n.nodeType === 1) {
+        if (n.dataset && n.dataset.stopId !== undefined) {
+            return { kind: 'stop', id: parseInt(n.dataset.stopId, 10), node: n };
+        }
+        if (n.dataset && n.dataset.routeId !== undefined) {
+            return { kind: 'route', id: parseInt(n.dataset.routeId, 10), node: n };
+        }
+        n = n.parentNode;
+    }
+    return { kind: 'empty' };
+}
+
+function screenToSvg(svg, clientX, clientY) {
+    // Mirrors the game's pan-zoom math: preserveAspectRatio="xMidYMid meet"
+    // letterboxes the viewBox inside the rendered rect, so the visible
+    // origin is offset by half the leftover space on the constrained axis.
+    const rect = svg.getBoundingClientRect();
+    const d = state.data;
+    if (rect.width === 0 || rect.height === 0) {
+        return { x: 0, y: 0 };
+    }
+    const scale = Math.min(rect.width / d.viewbox_w, rect.height / d.viewbox_h);
+    const offsetX = (rect.width  - d.viewbox_w * scale) / 2;
+    const offsetY = (rect.height - d.viewbox_h * scale) / 2;
+    return {
+        x: (clientX - rect.left - offsetX) / scale,
+        y: (clientY - rect.top  - offsetY) / scale,
+    };
+}
+
+function nextId(items) {
+    let max = 0;
+    for (const it of items) {
+        if (typeof it.id === 'number' && it.id > max) max = it.id;
+    }
+    return max + 1;
+}
+
+function addStopAt(pt) {
+    const id = nextId(state.data.stops);
+    state.data.stops.push({
+        id,
+        display_name: `Stop ${id}`,
+        x: Math.round(pt.x),
+        y: Math.round(pt.y),
+    });
+    markDirty();
+    setMode('select');
+    render();
+}
+
+function setMode(mode) {
+    state.mode = mode;
+    const radio = els.modeList.querySelector(`input[name="mode"][value="${mode}"]`);
+    if (radio) radio.checked = true;
+    document.body.dataset.mode = mode;
 }
 
 function buildGrid(w, h) {
@@ -363,7 +472,7 @@ function bindModeRadios() {
     els.modeList.addEventListener('change', (e) => {
         const target = e.target;
         if (target instanceof HTMLInputElement && target.name === 'mode') {
-            state.mode = target.value;
+            setMode(target.value);
         }
     });
 }
@@ -396,6 +505,7 @@ function bootstrap() {
         e.returnValue = '';
     });
 
+    setMode(state.mode);
     render();
 }
 
