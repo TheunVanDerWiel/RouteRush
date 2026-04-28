@@ -796,6 +796,7 @@ button:disabled {
 .log-row {
     display: flex;
     gap: 10px;
+    align-items: baseline;
     padding: 6px 0;
     border-bottom: 1px solid var(--border);
     font-size: 0.9rem;
@@ -804,3 +805,21 @@ button:disabled {
 .log-row:last-child { border-bottom: none; }
 
 .log-time { color: var(--ink-soft); flex-shrink: 0; }
+
+.log-body {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+
+.activity-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    line-height: 1.4;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    white-space: nowrap;
+}

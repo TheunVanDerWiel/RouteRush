@@ -71,29 +71,9 @@ use RouteRush\View;
         </ul>
     </section>
 
-    <section class="card teams-card">
-        <h2>Other teams</h2>
-        <ul class="team-list" id="other-teams">
-            <li data-color-index="1" class="placeholder-row">
-                <span class="swatch" aria-hidden="true"></span>
-                <span class="name">Bussen</span>
-                <span class="meta mono">5 cards · 2 routes</span>
-            </li>
-            <li data-color-index="2" class="placeholder-row">
-                <span class="swatch" aria-hidden="true"></span>
-                <span class="name">Trams</span>
-                <span class="meta mono">7 cards · 1 route</span>
-            </li>
-        </ul>
-    </section>
-
-    <section class="card log-card">
+    <section class="card log-card" id="activity-card">
         <h2>Recent activity</h2>
-        <ul class="log-list">
-            <li class="log-row placeholder-row"><span class="log-time mono">14:32</span> Bussen claimed a route</li>
-            <li class="log-row placeholder-row"><span class="log-time mono">14:30</span> Trams drew 2 cards</li>
-            <li class="log-row placeholder-row"><span class="log-time mono">14:28</span> Game started</li>
-        </ul>
+        <ul class="log-list" id="activity-list"></ul>
     </section>
 
 </main>

@@ -512,7 +512,7 @@ final class GameController
         }
 
         $stmt = $this->pdo->prepare(
-            'SELECT c.route_id, t.color_index
+            'SELECT c.route_id, c.claimed_at, t.color_index, t.name AS team_name
                FROM game_claims c
                JOIN game_teams  t ON t.id = c.team_id
               WHERE c.game_id = ?
@@ -522,6 +522,8 @@ final class GameController
         $claims = array_map(static fn(array $c) => [
             'route_id'         => (int) $c['route_id'],
             'team_color_index' => (int) $c['color_index'],
+            'team_name'        => $c['team_name'],
+            'claimed_at'       => $this->isoUtc($c['claimed_at']),
         ], $stmt->fetchAll());
 
         $stmt = $this->pdo->prepare(
@@ -554,6 +556,7 @@ final class GameController
             'mode' => 'snapshot',
             'game' => [
                 'status'                => $row['status'],
+                'started_at'            => $this->isoUtc($row['started_at']),
                 'ends_at'               => $endsAtIso,
                 'deck_remaining'        => (int) $row['deck_counter'],
                 'locomotives_remaining' => (int) $row['locomotives_remaining'],
@@ -1652,5 +1655,14 @@ final class GameController
     private static function error(string $code, string $message, int $status): Response
     {
         return Response::json(['error' => $code, 'message' => $message], $status);
+    }
+
+    private function isoUtc(?string $mysqlDateTime): ?string
+    {
+        if ($mysqlDateTime === null) {
+            return null;
+        }
+        return (new \DateTimeImmutable($mysqlDateTime, new \DateTimeZone('UTC')))
+            ->format('Y-m-d\TH:i:s.v\Z');
     }
 }

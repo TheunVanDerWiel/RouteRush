@@ -19,6 +19,7 @@ const btnTrade3Loco = document.getElementById('btn-trade-3-loco');
 const gameContainerEl = document.getElementById('game-container');
 const scoreboardEl = document.getElementById('scoreboard');
 const scoreboardListEl = document.getElementById('scoreboard-list');
+const activityListEl = document.getElementById('activity-list');
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -180,7 +181,7 @@ function setupPanZoom(svg, baseW, baseH) {
     // regardless of zoom. Without this, font-size in CSS px is interpreted as
     // SVG user units and shrinks/grows with the viewBox.
     // Larger maps get proportionally larger labels via the map-size factor.
-    const mapSizeFactor = Math.max(baseW, baseH) / 800;
+    const mapSizeFactor = Math.max(baseW, baseH) / 1000;
     const stopLabels = svg.querySelectorAll('.stop-label');
     const updateStopLabels = () => {
         const k = vb.w / baseW;
@@ -531,9 +532,88 @@ function renderState(state) {
     renderTickets(state);
     renderWindows(state);
     applyClaims(state.claims || []);
+    renderActivity(state);
     if (state.game.status === 'ended') {
         showScoreboard(state);
     }
+}
+
+function renderActivity(state) {
+    const claims = state.claims || [];
+    const startedAt = state.game && state.game.started_at;
+    const status    = state.game && state.game.status;
+
+    const items = [];
+    for (const c of claims) {
+        items.push({ kind: 'claim', ts: c.claimed_at, claim: c });
+    }
+    if (startedAt && status !== 'lobby') {
+        items.push({ kind: 'start', ts: startedAt });
+    }
+    // Newest first.
+    items.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0));
+
+    activityListEl.replaceChildren();
+    for (const it of items) {
+        activityListEl.appendChild(renderActivityRow(it));
+    }
+}
+
+function renderActivityRow(item) {
+    const li = document.createElement('li');
+    li.className = 'log-row';
+
+    const time = document.createElement('span');
+    time.className = 'log-time mono';
+    time.textContent = formatActivityTime(item.ts);
+    li.appendChild(time);
+
+    const body = document.createElement('span');
+    body.className = 'log-body';
+    if (item.kind === 'start') {
+        body.textContent = 'Game started';
+    } else {
+        const c = item.claim;
+        const teamBg = TEAM_COLORS[c.team_color_index] || '#888';
+        body.appendChild(makeActivityBadge(c.team_name || `Team ${c.team_color_index + 1}`, teamBg));
+        body.appendChild(document.createTextNode(' claimed '));
+
+        const route = mapData ? mapData.routes.find((r) => r.id === c.route_id) : null;
+        if (route) {
+            const routeColor = mapData.colors.find((cc) => cc.id === route.color_id);
+            const text = `${stopName(route.from_stop_id)} → ${stopName(route.to_stop_id)}`;
+            const bg = routeColor ? routeColor.hex : '#888';
+            body.appendChild(makeActivityBadge(text, bg));
+        }
+    }
+    li.appendChild(body);
+    return li;
+}
+
+function makeActivityBadge(text, bgHex) {
+    const span = document.createElement('span');
+    span.className = 'activity-badge';
+    span.textContent = text;
+    span.style.background = bgHex;
+    span.style.color = pickTextColor(bgHex);
+    return span;
+}
+
+function pickTextColor(hex) {
+    const m = /^#([0-9a-fA-F]{6})$/.exec(hex);
+    if (!m) return '#ffffff';
+    const r = parseInt(m[1].slice(0, 2), 16);
+    const g = parseInt(m[1].slice(2, 4), 16);
+    const b = parseInt(m[1].slice(4, 6), 16);
+    const l = 0.299 * r + 0.587 * g + 0.114 * b;
+    return l > 150 ? '#111111' : '#ffffff';
+}
+
+function formatActivityTime(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 function showScoreboard(state) {
