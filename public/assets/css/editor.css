@@ -305,6 +305,130 @@ select.props-input {
     background: #fef2f2;
 }
 
+/* ---------- Colors panel ---------- */
+
+.colors-hint {
+    margin-bottom: 8px;
+}
+
+.color-card {
+    border: 1px solid var(--ed-border);
+    border-radius: 6px;
+    padding: 8px;
+    margin-bottom: 8px;
+    background: var(--ed-surface);
+}
+
+.color-card.active {
+    border-color: var(--ed-accent);
+    box-shadow: 0 0 0 1px var(--ed-accent) inset;
+}
+
+.color-card-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+
+.color-swatch {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    flex-shrink: 0;
+    cursor: pointer;
+    padding: 0;
+}
+
+.color-name-input {
+    flex: 1;
+    min-width: 0;
+    padding: 3px 5px;
+    border: 1px solid var(--ed-border);
+    border-radius: 4px;
+    font: inherit;
+    color: var(--ed-ink);
+    background: var(--ed-surface);
+}
+
+.color-delete-btn {
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: var(--ed-ink-soft);
+    width: 22px;
+    height: 22px;
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+
+.color-delete-btn:hover:not(:disabled) {
+    background: #fef2f2;
+    color: var(--ed-error);
+}
+
+.color-delete-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.color-field {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 6px;
+    margin: 3px 0;
+    font-size: 0.8rem;
+}
+
+.color-field-label {
+    color: var(--ed-ink-soft);
+    flex-shrink: 0;
+}
+
+.color-hex-input {
+    width: 36px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid var(--ed-border);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.color-symbol-input,
+.color-deck-input {
+    width: 5em;
+    padding: 3px 5px;
+    border: 1px solid var(--ed-border);
+    border-radius: 4px;
+    font: inherit;
+    color: var(--ed-ink);
+    background: var(--ed-surface);
+    text-align: right;
+}
+
+.add-color-btn {
+    appearance: none;
+    border: 1px dashed var(--ed-border);
+    background: transparent;
+    color: var(--ed-ink-soft);
+    padding: 8px;
+    width: 100%;
+    font-size: 0.85rem;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-top: 4px;
+}
+
+.add-color-btn:hover {
+    background: var(--ed-bg);
+    color: var(--ed-ink);
+}
+
 .hint {
     margin: 0;
     color: var(--ed-ink-soft);

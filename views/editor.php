@@ -51,9 +51,7 @@
         </div>
 
         <h2>Colors</h2>
-        <div class="placeholder-panel" id="colors-list">
-            <p class="hint">Coming in a later slice.</p>
-        </div>
+        <div class="colors-panel" id="colors-list"></div>
     </aside>
 
     <section class="editor-canvas-wrap">

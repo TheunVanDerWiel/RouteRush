@@ -20,6 +20,12 @@ const SLOT_LABEL_FONT_SIZE = 7;
 const DEFAULT_ROUTE_LENGTH = 3;
 const DEFAULT_COLOR_HEX = '#1d3557';
 
+// Cycles for newly created colors; matches the team palette aesthetic.
+const COLOR_PALETTE = [
+    '#e63946', '#1d3557', '#2a9d8f', '#f4a261',
+    '#6a4c93', '#264653', '#e9c46a', '#a8dadc',
+];
+
 // ---------------------------------------------------------------------------
 // Default state
 // ---------------------------------------------------------------------------
@@ -35,7 +41,9 @@ function defaultData() {
         min_teams: 2,
         max_teams: 5,
         locomotives_count: 14,
-        colors: [],
+        colors: [
+            { id: 1, display_name: 'Default', hex: DEFAULT_COLOR_HEX, symbol: 'X', deck_count: 12 },
+        ],
         stops: [],
         routes: [],
         tickets: [],
@@ -48,6 +56,7 @@ const state = {
     mode: 'select',
     selection: null,
     addRouteFrom: null,  // stop id remembered as first click in Add route mode
+    activeColorId: null, // color picked for newly created routes
     dirty: false,
 };
 
@@ -78,6 +87,7 @@ const els = {
     banner:        document.getElementById('editor-banner'),
     canvas:        document.getElementById('editor-canvas'),
     properties:    document.getElementById('properties-panel'),
+    colorsList:    document.getElementById('colors-list'),
 
     fileJson:      document.getElementById('file-input-json'),
     fileImage:     document.getElementById('file-input-image'),
@@ -118,6 +128,7 @@ function setBanner(message, kind = 'info') {
 function render() {
     renderMeta();
     renderCanvas();
+    renderColors();
     renderProperties();
 }
 
@@ -377,6 +388,176 @@ function propValueSpan(text) {
     v.className = 'props-value';
     v.textContent = text;
     return v;
+}
+
+// ---------------------------------------------------------------------------
+// Colors panel
+// ---------------------------------------------------------------------------
+
+function syncActiveColor() {
+    if (state.activeColorId !== null
+        && state.data.colors.some((c) => c.id === state.activeColorId)) {
+        return;
+    }
+    state.activeColorId = state.data.colors.length > 0
+        ? state.data.colors[0].id
+        : null;
+}
+
+function renderColors() {
+    const list = els.colorsList;
+    list.replaceChildren();
+
+    const note = document.createElement('p');
+    note.className = 'hint colors-hint';
+    note.textContent = 'Click a swatch to use that color for new routes.';
+    list.appendChild(note);
+
+    for (const c of state.data.colors) {
+        list.appendChild(renderColorCard(c));
+    }
+
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'add-color-btn';
+    addBtn.textContent = '+ Add color';
+    addBtn.addEventListener('click', addNewColor);
+    list.appendChild(addBtn);
+}
+
+function renderColorCard(color) {
+    const card = document.createElement('div');
+    let cls = 'color-card';
+    if (state.activeColorId === color.id) cls += ' active';
+    card.className = cls;
+
+    // Header row: swatch (active picker) + name + delete
+    const head = document.createElement('div');
+    head.className = 'color-card-head';
+
+    const swatch = document.createElement('button');
+    swatch.type = 'button';
+    swatch.className = 'color-swatch';
+    swatch.style.background = color.hex;
+    swatch.title = 'Use this color for new routes';
+    swatch.addEventListener('click', () => {
+        state.activeColorId = color.id;
+        renderColors();
+    });
+
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.value = color.display_name;
+    nameInput.className = 'color-name-input';
+    nameInput.addEventListener('input', () => {
+        color.display_name = nameInput.value;
+        markDirty();
+        // Route properties panel may show this color in its dropdown.
+        renderProperties();
+    });
+
+    const usedBy   = state.data.routes.filter((r) => r.color_id === color.id).length;
+    const isLast   = state.data.colors.length <= 1;
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'color-delete-btn';
+    deleteBtn.textContent = '×';
+    if (usedBy > 0) {
+        deleteBtn.title = `Cannot delete: used by ${usedBy} route${usedBy === 1 ? '' : 's'}`;
+        deleteBtn.disabled = true;
+    } else if (isLast) {
+        deleteBtn.title = 'Cannot delete the last color';
+        deleteBtn.disabled = true;
+    } else {
+        deleteBtn.title = 'Delete color';
+    }
+    deleteBtn.addEventListener('click', () => deleteColor(color.id));
+
+    head.append(swatch, nameInput, deleteBtn);
+    card.appendChild(head);
+
+    // Hex
+    const hexInput = document.createElement('input');
+    hexInput.type = 'color';
+    hexInput.value = color.hex;
+    hexInput.className = 'color-hex-input';
+    hexInput.addEventListener('input', () => {
+        color.hex = hexInput.value;
+        swatch.style.background = hexInput.value;
+        markDirty();
+        renderCanvas();
+    });
+    card.appendChild(colorFieldRow('Hex', hexInput));
+
+    // Symbol
+    const symInput = document.createElement('input');
+    symInput.type = 'text';
+    symInput.maxLength = 20;
+    symInput.value = color.symbol;
+    symInput.className = 'color-symbol-input';
+    symInput.addEventListener('input', () => {
+        color.symbol = symInput.value;
+        markDirty();
+        renderCanvas();
+    });
+    card.appendChild(colorFieldRow('Symbol', symInput));
+
+    // Deck count
+    const deckInput = document.createElement('input');
+    deckInput.type = 'number';
+    deckInput.min = '0';
+    deckInput.step = '1';
+    deckInput.value = String(color.deck_count);
+    deckInput.className = 'color-deck-input';
+    deckInput.addEventListener('input', () => {
+        const n = parseInt(deckInput.value, 10);
+        if (!isNaN(n) && n >= 0) {
+            color.deck_count = n;
+            markDirty();
+        }
+    });
+    card.appendChild(colorFieldRow('Deck count', deckInput));
+
+    return card;
+}
+
+function colorFieldRow(labelText, control) {
+    const row = document.createElement('label');
+    row.className = 'color-field';
+    const l = document.createElement('span');
+    l.className = 'color-field-label';
+    l.textContent = labelText;
+    row.append(l, control);
+    return row;
+}
+
+function addNewColor() {
+    const id = nextId(state.data.colors);
+    const hex = COLOR_PALETTE[state.data.colors.length % COLOR_PALETTE.length];
+    state.data.colors.push({
+        id,
+        display_name: `Color ${id}`,
+        hex,
+        symbol: 'X',
+        deck_count: 12,
+    });
+    state.activeColorId = id;
+    markDirty();
+    renderColors();
+    renderProperties();
+}
+
+function deleteColor(colorId) {
+    const idx = state.data.colors.findIndex((c) => c.id === colorId);
+    if (idx === -1) return;
+    // Mirror the UI guards (button is already disabled in those cases).
+    if (state.data.colors.length <= 1) return;
+    if (state.data.routes.some((r) => r.color_id === colorId)) return;
+    state.data.colors.splice(idx, 1);
+    syncActiveColor();
+    markDirty();
+    renderColors();
+    renderProperties();
 }
 
 function renderCanvas() {
@@ -726,7 +907,9 @@ function handleAddRouteClick(target) {
 }
 
 function addRouteBetween(fromId, toId) {
-    const colorId = ensureDefaultColor();
+    const colorId = state.activeColorId !== null
+        ? state.activeColorId
+        : ensureDefaultColor();
     const id = nextId(state.data.routes);
     state.data.routes.push({
         id,
@@ -744,7 +927,9 @@ function addRouteBetween(fromId, toId) {
 
 function ensureDefaultColor() {
     if (state.data.colors.length > 0) {
-        return state.data.colors[0].id;
+        const id = state.data.colors[0].id;
+        if (state.activeColorId === null) state.activeColorId = id;
+        return id;
     }
     const id = nextId(state.data.colors);
     state.data.colors.push({
@@ -754,6 +939,7 @@ function ensureDefaultColor() {
         symbol: 'X',
         deck_count: 12,
     });
+    state.activeColorId = id;
     return id;
 }
 
@@ -918,6 +1104,8 @@ function onNew() {
     state.data = defaultData();
     state.bg = null;
     state.selection = null;
+    state.activeColorId = null;
+    syncActiveColor();
     setBanner(null);
     markClean();
     render();
@@ -948,6 +1136,8 @@ async function onLoadJsonFile(file) {
     if (!merged) return;
     state.data = merged;
     state.selection = null;
+    state.activeColorId = null;
+    syncActiveColor();
     setBanner(null);
     markClean();
     render();
@@ -1074,6 +1264,7 @@ function bootstrap() {
     });
 
     setMode(state.mode);
+    syncActiveColor();
     render();
 }
 
