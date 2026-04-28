@@ -49,6 +49,7 @@ let lastState = null;
 let pendingChoices = new Map();   // ticket_id -> 'keep' | 'discard'
 let lastPendingKey = '';          // signature of last seen pending set; triggers reminder on change
 let reminderOpen = false;
+let selectedTicketId = null;      // currently highlighted kept ticket, or null
 
 async function fetchMap() {
     const res = await fetch(`/api/games/${encodeURIComponent(code)}/map`, {
@@ -750,6 +751,11 @@ function renderTickets(state) {
     const kept = team.tickets || [];
     const pending = team.pending_tickets || [];
 
+    // Drop a stale selection if the ticket is no longer kept.
+    if (selectedTicketId !== null && !kept.find((t) => t.id === selectedTicketId)) {
+        selectedTicketId = null;
+    }
+
     ticketsKeptEl.replaceChildren();
     if (kept.length === 0) {
         ticketsKeptEl.appendChild(ticketsEmptyEl);
@@ -758,6 +764,7 @@ function renderTickets(state) {
             ticketsKeptEl.appendChild(renderTicketRow(t, false));
         }
     }
+    applyStopHighlight();
 
     const pendingKey = pending.map((t) => t.id).sort((a, b) => a - b).join(',');
     if (pendingKey !== lastPendingKey) {
@@ -791,6 +798,9 @@ function renderTickets(state) {
 function renderTicketRow(t, isPending) {
     const li = document.createElement('li');
     li.className = 'ticket-row' + (t.is_long_route ? ' long' : '');
+    if (!isPending && t.id === selectedTicketId) {
+        li.classList.add('selected');
+    }
 
     const info = document.createElement('div');
     info.className = 'ticket-info';
@@ -808,6 +818,11 @@ function renderTicketRow(t, isPending) {
     points.textContent = `${t.points} pts`;
     info.append(route, points);
     li.appendChild(info);
+
+    if (!isPending) {
+        li.classList.add('selectable');
+        li.addEventListener('click', () => toggleTicketSelection(t.id));
+    }
 
     if (isPending) {
         const toggle = document.createElement('div');
@@ -838,6 +853,28 @@ function renderTicketRow(t, isPending) {
         sync();
     }
     return li;
+}
+
+function toggleTicketSelection(id) {
+    selectedTicketId = (selectedTicketId === id) ? null : id;
+    if (lastState) renderTickets(lastState);
+}
+
+function applyStopHighlight() {
+    if (!mapData) return;
+    let fromId = null;
+    let toId = null;
+    if (selectedTicketId !== null && lastState && lastState.team) {
+        const t = (lastState.team.tickets || []).find((x) => x.id === selectedTicketId);
+        if (t) {
+            fromId = t.from_stop_id;
+            toId   = t.to_stop_id;
+        }
+    }
+    for (const g of mapFrameEl.querySelectorAll('.stop')) {
+        const sid = parseInt(g.dataset.stopId, 10);
+        g.classList.toggle('highlighted', sid === fromId || sid === toId);
+    }
 }
 
 function updateDecideButton(minKeepArg) {

@@ -519,11 +519,12 @@ final class GameController
            ORDER BY c.id'
         );
         $stmt->execute([(int) $row['id']]);
+        $isoUtc = fn(?string $dt) => $this->isoUtc($dt);
         $claims = array_map(static fn(array $c) => [
             'route_id'         => (int) $c['route_id'],
             'team_color_index' => (int) $c['color_index'],
             'team_name'        => $c['team_name'],
-            'claimed_at'       => $this->isoUtc($c['claimed_at']),
+            'claimed_at'       => $isoUtc($c['claimed_at']),
         ], $stmt->fetchAll());
 
         $stmt = $this->pdo->prepare(
