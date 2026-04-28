@@ -244,6 +244,28 @@ body.editor-body {
     pointer-events: none;
 }
 
+/* ---------- Routes ---------- */
+
+.editor-route {
+    cursor: pointer;
+}
+
+.editor-route-slot {
+    stroke: #f4ffcc;
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+}
+
+.editor-route-slot-label {
+    fill: #ffffff;
+    paint-order: stroke;
+    stroke: rgba(0, 0, 0, 0.55);
+    stroke-width: 1.2;
+    stroke-linejoin: round;
+    pointer-events: none;
+    font-weight: 600;
+}
+
 /* ---------- Stops ---------- */
 
 .editor-stop {
@@ -255,6 +277,12 @@ body.editor-body {
     stroke: var(--ed-ink);
     stroke-width: 2;
     vector-effect: non-scaling-stroke;
+}
+
+.editor-stop.route-from .editor-stop-circle {
+    fill: #ffd166;
+    stroke: var(--ed-warn);
+    stroke-width: 4;
 }
 
 .editor-stop-label {
