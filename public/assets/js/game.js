@@ -25,6 +25,7 @@ const POLL_INTERVAL_MS = 5000;
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const STOP_RADIUS = 10;
 const STOP_LABEL_OFFSET = 14;
+const STOP_LABEL_FONT_SIZE = 22;
 const ROUTE_STOP_MARGIN = 10;
 const SLOT_H = 12;
 const SLOT_GAP = 3;
@@ -175,7 +176,26 @@ function setupPanZoom(svg, baseW, baseH) {
     const ratio = baseH / baseW;
     const vb = { x: 0, y: 0, w: baseW, h: baseH };
 
-    const apply = () => svg.setAttribute('viewBox', `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
+    // Counter-scale stop labels so their on-screen size stays constant
+    // regardless of zoom. Without this, font-size in CSS px is interpreted as
+    // SVG user units and shrinks/grows with the viewBox.
+    // Larger maps get proportionally larger labels via the map-size factor.
+    const mapSizeFactor = Math.max(baseW, baseH) / 800;
+    const stopLabels = svg.querySelectorAll('.stop-label');
+    const updateStopLabels = () => {
+        const k = vb.w / baseW;
+        const fs = STOP_LABEL_FONT_SIZE * mapSizeFactor * k;
+        const oy = STOP_RADIUS + STOP_LABEL_OFFSET * mapSizeFactor * k;
+        for (const t of stopLabels) {
+            t.style.fontSize = `${fs}px`;
+            t.setAttribute('y', String(oy));
+        }
+    };
+
+    const apply = () => {
+        svg.setAttribute('viewBox', `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
+        updateStopLabels();
+    };
 
     // Compute the displayed scale (px per SVG unit) honouring
     // preserveAspectRatio="meet" letterboxing.
@@ -378,27 +398,6 @@ function renderRoute(route, stopsById, colorsById, perpOffset) {
     const b = stopsById.get(route.to_stop_id);
     if (!a || !b) return null;
 
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const len = Math.hypot(dx, dy);
-    if (len === 0) return null;
-
-    const ux = dx / len;
-    const uy = dy / len;
-    const px = -uy;
-    const py = ux;
-
-    const inset = STOP_RADIUS + ROUTE_STOP_MARGIN;
-    const ax = a.x + ux * inset + px * perpOffset;
-    const ay = a.y + uy * inset + py * perpOffset;
-    const bx = b.x - ux * inset + px * perpOffset;
-    const by = b.y - uy * inset + py * perpOffset;
-
-    const segLen = Math.hypot(bx - ax, by - ay);
-    const slotW = (segLen - (route.length - 1) * SLOT_GAP) / route.length;
-    const angleDeg = (Math.atan2(by - ay, bx - ax) * 180) / Math.PI;
-    // Keep slot labels right-side-up regardless of route direction.
-    const labelFlip = angleDeg > 90 || angleDeg < -90;
     const color = colorsById.get(route.color_id);
     const fill = color ? color.hex : '#888';
     const labelText = color ? color.symbol : '';
@@ -411,7 +410,64 @@ function renderRoute(route, stopsById, colorsById, perpOffset) {
     g.dataset.originalFill = fill;
     g.addEventListener('click', () => onRouteClick(route));
 
-    for (let i = 0; i < route.length; i++) {
+    const segments = splitRouteSegments(route, a, b);
+    if (segments.length === 0) return null;
+    for (const seg of segments) {
+        appendRouteSegment(g, seg, perpOffset, fill, labelText);
+    }
+    return g;
+}
+
+function splitRouteSegments(route, a, b) {
+    const hasVia = route.via_x !== null && route.via_x !== undefined
+                && route.via_y !== null && route.via_y !== undefined
+                && route.length >= 2;
+    if (!hasVia) {
+        return [{ from: a, to: b, slots: route.length, insetFrom: true, insetTo: true }];
+    }
+    const v = { x: route.via_x, y: route.via_y };
+    const d1 = Math.hypot(v.x - a.x, v.y - a.y);
+    const d2 = Math.hypot(b.x - v.x, b.y - v.y);
+    const total = d1 + d2;
+    let n1 = total > 0
+        ? Math.round((route.length * d1) / total)
+        : Math.floor(route.length / 2);
+    n1 = Math.max(1, Math.min(route.length - 1, n1));
+    const n2 = route.length - n1;
+    return [
+        { from: a, to: v, slots: n1, insetFrom: true,  insetTo: false },
+        { from: v, to: b, slots: n2, insetFrom: false, insetTo: true  },
+    ];
+}
+
+function appendRouteSegment(g, seg, perpOffset, fill, labelText) {
+    const { from, to, slots, insetFrom, insetTo } = seg;
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const len = Math.hypot(dx, dy);
+    if (len === 0 || slots <= 0) return;
+
+    const ux = dx / len;
+    const uy = dy / len;
+    const px = -uy;
+    const py = ux;
+
+    const inset = STOP_RADIUS + ROUTE_STOP_MARGIN;
+    const insFrom = insetFrom ? inset : 0;
+    const insTo   = insetTo   ? inset : 0;
+    const ax = from.x + ux * insFrom + px * perpOffset;
+    const ay = from.y + uy * insFrom + py * perpOffset;
+    const bx = to.x   - ux * insTo   + px * perpOffset;
+    const by = to.y   - uy * insTo   + py * perpOffset;
+
+    const segLen = Math.hypot(bx - ax, by - ay);
+    if (segLen <= 0) return;
+    const slotW = (segLen - (slots - 1) * SLOT_GAP) / slots;
+    const angleDeg = (Math.atan2(by - ay, bx - ax) * 180) / Math.PI;
+    // Keep slot labels right-side-up regardless of route direction.
+    const labelFlip = angleDeg > 90 || angleDeg < -90;
+
+    for (let i = 0; i < slots; i++) {
         const along = i * (slotW + SLOT_GAP) + slotW / 2;
         const cx = ax + ux * along;
         const cy = ay + uy * along;
@@ -425,6 +481,7 @@ function renderRoute(route, stopsById, colorsById, perpOffset) {
         rect.setAttribute('height', String(SLOT_H));
         rect.setAttribute('rx', String(SLOT_RADIUS));
         rect.setAttribute('class', 'route-slot');
+        rect.setAttribute('vector-effect', 'non-scaling-stroke');
         rect.style.fill = fill;
         slot.appendChild(rect);
 
@@ -440,7 +497,6 @@ function renderRoute(route, stopsById, colorsById, perpOffset) {
 
         g.appendChild(slot);
     }
-    return g;
 }
 
 function renderStop(stop) {

@@ -415,7 +415,7 @@ final class GameController
         ], $stmt->fetchAll());
 
         $stmt = $this->pdo->prepare(
-            'SELECT id, from_stop_id, to_stop_id, length, color_id, parallel_index
+            'SELECT id, from_stop_id, to_stop_id, via_x, via_y, length, color_id, parallel_index
                FROM map_routes WHERE map_id = ? ORDER BY id'
         );
         $stmt->execute([$mapId]);
@@ -423,6 +423,8 @@ final class GameController
             'id'             => (int) $r['id'],
             'from_stop_id'   => (int) $r['from_stop_id'],
             'to_stop_id'     => (int) $r['to_stop_id'],
+            'via_x'          => $r['via_x'] !== null ? (int) $r['via_x'] : null,
+            'via_y'          => $r['via_y'] !== null ? (int) $r['via_y'] : null,
             'length'         => (int) $r['length'],
             'color_id'       => (int) $r['color_id'],
             'parallel_index' => (int) $r['parallel_index'],

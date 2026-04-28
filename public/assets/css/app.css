@@ -304,13 +304,13 @@ button:disabled {
 }
 
 .route-slot {
-    stroke: rgba(0, 0, 0, 0.35);
-    stroke-width: 0.75;
+    stroke: #f4ffcc;
+    stroke-width: 1;
 }
 
 .route.claimed .route-slot {
-    stroke: rgba(0, 0, 0, 0.65);
-    stroke-width: 1.2;
+    stroke: #4d1717;
+    stroke-width: 3;
 }
 
 .route:not(.claimed) {
@@ -320,7 +320,7 @@ button:disabled {
 @media (hover: hover) and (pointer: fine) {
     .route:not(.claimed):hover .route-slot {
         stroke: var(--ink);
-        stroke-width: 1.5;
+        stroke-width: 2;
     }
 }
 
