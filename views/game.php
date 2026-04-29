@@ -23,8 +23,7 @@ use RouteRush\View;
         <span class="game-header-value mono" id="countdown">--:--</span>
     </div>
     <div class="game-header-cell">
-        <span class="game-header-label">Deck</span>
-        <span class="game-header-value mono" id="deck-remaining">--</span>
+        <a class="game-header-rules" href="/rules" target="_blank" rel="noopener">Rules</a>
     </div>
 </header>
 

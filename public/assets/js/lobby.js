@@ -1,3 +1,5 @@
+import { saveSession } from './session.js';
+
 const code = document.body.dataset.gameCode;
 const playerIdInitial = document.body.dataset.playerId
     ? parseInt(document.body.dataset.playerId, 10)
@@ -166,6 +168,12 @@ createForm.addEventListener('submit', async (e) => {
         myPlayerId = data.player_id;
         teamPinEl.textContent = data.pin;
         pinDisplay.hidden = false;
+        saveSession({
+            code,
+            team_id:     data.team_id,
+            pin:         data.pin,
+            player_name: playerName,
+        });
         const state = await fetchState();
         if (state) renderState(state);
     } catch {
@@ -224,6 +232,12 @@ joinForm.addEventListener('submit', async (e) => {
         }
         myTeamId = data.team_id;
         myPlayerId = data.player_id;
+        saveSession({
+            code,
+            team_id:     teamId,
+            pin,
+            player_name: playerName,
+        });
         const state = await fetchState();
         if (state) renderState(state);
     } catch {

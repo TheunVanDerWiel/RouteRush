@@ -48,6 +48,7 @@ final class App
         $this->router->get('/lobby/{code}',     fn(Request $r, array $p) => (new HomeController($pdo))->lobby($p['code']));
         $this->router->get('/game/{code}',      fn(Request $r, array $p) => (new HomeController($pdo))->game($p['code']));
         $this->router->get('/editor',           fn() => (new HomeController($pdo))->editor());
+        $this->router->get('/rules',            fn() => (new HomeController($pdo))->rules());
 
         $this->router->get('/api/maps',                              fn() => (new MapController($pdo))->index());
         $this->router->get('/api/editor/maps',                       fn() => (new MapController($pdo))->listAll());

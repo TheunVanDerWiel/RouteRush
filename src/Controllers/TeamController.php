@@ -201,8 +201,8 @@ final class TeamController
         if ($row === false) {
             return self::error('not_found', 'Team not found in this game', 404);
         }
-        if ($row['status'] !== 'lobby') {
-            return self::error('game_not_lobby', 'Game is no longer accepting new players', 409);
+        if ($row['status'] === 'ended') {
+            return self::error('game_ended', 'Game has ended', 409);
         }
 
         if (!password_verify($pin, $row['pin_hash'])) {
@@ -223,7 +223,8 @@ final class TeamController
         // Rejoin path: a player with this exact display_name already exists on
         // the team. PIN matched, so this is the same human reconnecting after
         // a session loss. Reissue the session token against their existing
-        // player record instead of inserting a duplicate.
+        // player record instead of inserting a duplicate. Rejoin works during
+        // both lobby and in_progress; new joins are gated to lobby below.
         $stmt = $this->pdo->prepare(
             'SELECT id FROM game_players WHERE team_id = ? AND display_name = ? LIMIT 1'
         );
@@ -242,6 +243,10 @@ final class TeamController
                 'player_id'   => $playerId,
                 'color_index' => $colorIndex,
             ]);
+        }
+
+        if ($row['status'] !== 'lobby') {
+            return self::error('game_not_lobby', 'Game is no longer accepting new players', 409);
         }
 
         $stmt = $this->pdo->prepare('SELECT COUNT(*) AS n FROM game_players WHERE team_id = ?');

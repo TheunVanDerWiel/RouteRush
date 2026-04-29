@@ -1,7 +1,73 @@
+import { loadSession, clearSession } from './session.js';
+
 const createForm = document.getElementById('create-game-form');
 const createError = document.getElementById('create-error');
 const joinForm = document.getElementById('join-form');
 const joinError = document.getElementById('join-error');
+
+// On page load, if we still have a saved session, try to silently rejoin
+// the user's last game. Lobby → /lobby, in_progress (not yet expired) →
+// /game, otherwise drop the saved session.
+(async function tryAutoRejoin() {
+    const sess = loadSession();
+    if (!sess) return;
+
+    let stateRes;
+    try {
+        stateRes = await fetch(`/api/games/${encodeURIComponent(sess.code)}`, {
+            headers: { Accept: 'application/json' },
+        });
+    } catch {
+        return;
+    }
+    if (!stateRes.ok) {
+        if (stateRes.status === 404) clearSession();
+        return;
+    }
+
+    let state = null;
+    try { state = await stateRes.json(); } catch { /* ignore */ }
+    if (!state) return;
+
+    if (state.status === 'ended') {
+        clearSession();
+        return;
+    }
+    if (state.status === 'in_progress' && state.ends_at) {
+        const endsAtMs = Date.parse(state.ends_at);
+        if (!isNaN(endsAtMs) && Date.now() >= endsAtMs) {
+            clearSession();
+            return;
+        }
+    }
+
+    // Re-establish the server-side session by hitting the join endpoint.
+    let joinRes;
+    try {
+        joinRes = await fetch(
+            `/api/games/${encodeURIComponent(sess.code)}/teams/${sess.team_id}/join`,
+            {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({ player_name: sess.player_name, pin: sess.pin }),
+            },
+        );
+    } catch {
+        return;
+    }
+    if (!joinRes.ok) {
+        // Wrong PIN, missing team, ended game — saved data is stale.
+        if (joinRes.status === 401 || joinRes.status === 404 || joinRes.status === 409) {
+            clearSession();
+        }
+        return;
+    }
+
+    const target = state.status === 'lobby'
+        ? `/lobby/${encodeURIComponent(sess.code)}`
+        : `/game/${encodeURIComponent(sess.code)}`;
+    window.location.href = target;
+})();
 
 createForm.addEventListener('submit', async (e) => {
     e.preventDefault();

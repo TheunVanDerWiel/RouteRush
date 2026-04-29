@@ -15,6 +15,7 @@ use RouteRush\View;
     <header>
         <h1>Route Rush</h1>
         <p class="tagline">Ticket to Ride, played on real public transport.</p>
+        <p><a href="/rules" target="_blank" rel="noopener" class="rules-button">Rules</a></p>
     </header>
 
     <section class="card">

@@ -1,6 +1,7 @@
+import { clearSession } from './session.js';
+
 const code = document.body.dataset.gameCode;
 const countdownEl = document.getElementById('countdown');
-const deckRemainingEl = document.getElementById('deck-remaining');
 const handEl = document.getElementById('hand');
 const mapFrameEl = document.getElementById('map-frame');
 const ticketsKeptEl = document.getElementById('tickets-kept');
@@ -528,7 +529,6 @@ function renderState(state) {
     if (state.game.ends_at) {
         endsAtMs = Date.parse(state.game.ends_at);
     }
-    deckRemainingEl.textContent = String(state.game.deck_remaining);
     renderHand(state);
     renderTickets(state);
     renderWindows(state);
@@ -1472,6 +1472,13 @@ async function bootstrap() {
     btnDrawTickets.addEventListener('click', onDrawTickets);
     btnTrade32.addEventListener('click', () => onTrade('any3for2'));
     btnTrade3Loco.addEventListener('click', () => onTrade('same3forLoco'));
+
+    // The "Back to home" link in the scoreboard ends the session.
+    const homeLink = scoreboardEl.querySelector('.home-link');
+    if (homeLink) {
+        homeLink.addEventListener('click', () => clearSession());
+    }
+
     mapData = await fetchMap();
     if (mapData) renderMap(mapData);
     await pollState();

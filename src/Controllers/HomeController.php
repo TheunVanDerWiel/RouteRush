@@ -61,4 +61,9 @@ final class HomeController
     {
         return Response::html(View::render('editor', []));
     }
+
+    public function rules(): Response
+    {
+        return Response::html(View::render('rules', []));
+    }
 }
