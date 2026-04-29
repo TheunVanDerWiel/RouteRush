@@ -142,6 +142,12 @@ body.editor-body {
     color: var(--ed-error);
 }
 
+.editor-banner.success {
+    background: #f0fdf4;
+    border-bottom-color: #bbf7d0;
+    color: #15803d;
+}
+
 .editor-banner-list {
     margin: 4px 0 0;
     padding-left: 20px;
@@ -688,6 +694,107 @@ select.props-input {
 }
 
 .load-db-actions button.primary:hover {
+    filter: brightness(1.1);
+}
+
+/* ---------- Save-to-DB dialog ---------- */
+
+.save-db-dialog {
+    border: none;
+    border-radius: var(--ed-radius);
+    padding: 20px;
+    min-width: 360px;
+    max-width: 480px;
+    background: var(--ed-surface);
+    color: var(--ed-ink);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+
+.save-db-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.4);
+}
+
+.save-db-title {
+    margin: 0 0 12px;
+    font-size: 1.05rem;
+    font-weight: 700;
+}
+
+.save-db-text {
+    margin: 0 0 8px;
+    color: var(--ed-ink);
+    font-size: 0.9rem;
+}
+
+.save-db-countdown {
+    margin: 4px 0 8px;
+    color: var(--ed-ink-soft);
+    font-size: 0.85rem;
+}
+
+.save-db-countdown.expired {
+    color: var(--ed-error);
+    font-weight: 600;
+}
+
+.save-db-otp-input {
+    display: block;
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--ed-border);
+    border-radius: 6px;
+    font: inherit;
+    font-size: 1.1rem;
+    letter-spacing: 0.3em;
+    text-align: center;
+    color: var(--ed-ink);
+    background: var(--ed-surface);
+}
+
+.save-db-error {
+    margin: 8px 0;
+    padding: 8px 10px;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 6px;
+    color: var(--ed-error);
+    font-size: 0.85rem;
+}
+
+.save-db-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+.save-db-actions button {
+    appearance: none;
+    border: 1px solid var(--ed-border);
+    background: var(--ed-surface);
+    color: var(--ed-ink);
+    padding: 6px 14px;
+    font-size: 0.9rem;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.save-db-actions button:hover:not(:disabled) {
+    background: var(--ed-bg);
+}
+
+.save-db-actions button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.save-db-actions button.primary {
+    background: var(--ed-accent);
+    color: var(--ed-accent-ink);
+    border-color: var(--ed-accent);
+}
+
+.save-db-actions button.primary:hover:not(:disabled) {
     filter: brightness(1.1);
 }
 

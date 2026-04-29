@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace RouteRush;
 
 use PDO;
+use RouteRush\Controllers\EditorController;
 use RouteRush\Controllers\GameController;
 use RouteRush\Controllers\HomeController;
 use RouteRush\Controllers\MapController;
@@ -36,7 +37,12 @@ final class App
 
     private function registerRoutes(): void
     {
-        $pdo = $this->pdo;
+        $pdo    = $this->pdo;
+        $config = $this->config;
+        $editorFactory = static function () use ($pdo, $config): EditorController {
+            $editorCfg = $config->get('editor', []);
+            return new EditorController($pdo, $editorCfg, new Mailer($editorCfg));
+        };
 
         $this->router->get('/',                 fn() => (new HomeController($pdo))->index());
         $this->router->get('/lobby/{code}',     fn(Request $r, array $p) => (new HomeController($pdo))->lobby($p['code']));
@@ -46,6 +52,8 @@ final class App
         $this->router->get('/api/maps',                              fn() => (new MapController($pdo))->index());
         $this->router->get('/api/editor/maps',                       fn() => (new MapController($pdo))->listAll());
         $this->router->get('/api/editor/maps/{id}',                  fn(Request $r, array $p) => (new MapController($pdo))->show($p['id']));
+        $this->router->post('/api/editor/maps/request-otp',          fn() => $editorFactory()->requestOtp());
+        $this->router->post('/api/editor/maps',                      fn(Request $r) => $editorFactory()->saveMap($r));
         $this->router->post('/api/games',                            fn(Request $r) => (new GameController($pdo))->create($r));
         $this->router->get('/api/games/{code}',                      fn(Request $r, array $p) => (new GameController($pdo))->show($p['code']));
         $this->router->get('/api/games/{code}/map',                  fn(Request $r, array $p) => (new GameController($pdo))->map($p['code']));

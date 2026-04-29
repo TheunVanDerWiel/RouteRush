@@ -16,7 +16,8 @@
         <button type="button" id="btn-load-db">Load from DB…</button>
         <button type="button" id="btn-load-image">Load image…</button>
         <button type="button" id="btn-clear-image" hidden>Clear image</button>
-        <button type="button" id="btn-save" class="primary">Save…</button>
+        <button type="button" id="btn-save">Save…</button>
+        <button type="button" id="btn-save-db" class="primary">Save to DB…</button>
         <span class="dirty-flag" id="dirty-flag" title="Unsaved changes" hidden>●</span>
     </div>
 </header>

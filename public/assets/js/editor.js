@@ -72,6 +72,7 @@ const els = {
     btnLoadImage:  document.getElementById('btn-load-image'),
     btnClearImage: document.getElementById('btn-clear-image'),
     btnSave:       document.getElementById('btn-save'),
+    btnSaveDb:     document.getElementById('btn-save-db'),
     dirtyFlag:     document.getElementById('dirty-flag'),
 
     name:          document.getElementById('meta-name'),
@@ -112,15 +113,22 @@ function markClean() {
     els.dirtyFlag.hidden = true;
 }
 
+let bannerClearTimer = null;
+
 function setBanner(message, kind = 'info') {
+    if (bannerClearTimer) {
+        clearTimeout(bannerClearTimer);
+        bannerClearTimer = null;
+    }
     const empty = !message || (Array.isArray(message) && message.length === 0);
     if (empty) {
         els.banner.hidden = true;
         els.banner.replaceChildren();
-        els.banner.classList.remove('error');
+        els.banner.classList.remove('error', 'success');
         return;
     }
-    els.banner.classList.toggle('error', kind === 'error');
+    els.banner.classList.toggle('error',   kind === 'error');
+    els.banner.classList.toggle('success', kind === 'success');
     els.banner.hidden = false;
     els.banner.replaceChildren();
     if (Array.isArray(message)) {
@@ -137,6 +145,9 @@ function setBanner(message, kind = 'info') {
         els.banner.appendChild(ul);
     } else {
         els.banner.textContent = message;
+    }
+    if (kind === 'success') {
+        bannerClearTimer = setTimeout(() => setBanner(null), 5000);
     }
 }
 
@@ -1679,6 +1690,223 @@ function filenameFor(name) {
     return `${slug}.json`;
 }
 
+function onSaveToDb() {
+    const errors = validateMap(state.data);
+    if (errors.length > 0) {
+        setBanner(errors, 'error');
+        return;
+    }
+    setBanner(null);
+    showSaveToDbDialog();
+}
+
+function showSaveToDbDialog() {
+    const dlg = document.createElement('dialog');
+    dlg.className = 'save-db-dialog';
+    document.body.appendChild(dlg);
+
+    let countdownTimer = null;
+    const cleanup = () => {
+        if (countdownTimer) {
+            clearInterval(countdownTimer);
+            countdownTimer = null;
+        }
+    };
+    dlg.addEventListener('close', () => {
+        cleanup();
+        dlg.remove();
+    });
+
+    showRequestPhase();
+    dlg.showModal();
+
+    function showRequestPhase(errorText) {
+        cleanup();
+        dlg.replaceChildren();
+        appendTitle('Save map to database');
+
+        const p = document.createElement('p');
+        p.className = 'save-db-text';
+        p.textContent = `A one-time password will be emailed to the configured admin address. `
+            + `Enter it once received to authorise saving "${state.data.name}".`;
+        dlg.appendChild(p);
+
+        if (errorText) appendError(errorText);
+
+        const actions = document.createElement('div');
+        actions.className = 'save-db-actions';
+        actions.append(
+            btn('Cancel', () => dlg.close('cancel')),
+            btn('Send password', sendOtp, 'primary'),
+        );
+        dlg.appendChild(actions);
+    }
+
+    async function sendOtp() {
+        showSendingPhase();
+        let resp;
+        try {
+            resp = await fetch('/api/editor/maps/request-otp', { method: 'POST' });
+        } catch (e) {
+            showRequestPhase(`Could not contact server: ${e.message}`);
+            return;
+        }
+        let data = null;
+        try { data = await resp.json(); } catch { /* ignore */ }
+        if (!resp.ok) {
+            const msg = (data && data.message) || `Server error (HTTP ${resp.status}).`;
+            showRequestPhase(msg);
+            return;
+        }
+        const ttl = (data && data.expires_in_seconds) || 300;
+        showEnterPhase(Date.now() + ttl * 1000);
+    }
+
+    function showSendingPhase() {
+        cleanup();
+        dlg.replaceChildren();
+        appendTitle('Save map to database');
+        const p = document.createElement('p');
+        p.className = 'save-db-text';
+        p.textContent = 'Sending password…';
+        dlg.appendChild(p);
+    }
+
+    function showEnterPhase(expiresAtMs, errorText) {
+        cleanup();
+        dlg.replaceChildren();
+        appendTitle('Enter one-time password');
+
+        const p = document.createElement('p');
+        p.className = 'save-db-text';
+        p.textContent = 'Enter the password from your email to save the map.';
+        dlg.appendChild(p);
+
+        const countdown = document.createElement('p');
+        countdown.className = 'save-db-countdown';
+        dlg.appendChild(countdown);
+
+        const otpInput = document.createElement('input');
+        otpInput.type = 'text';
+        otpInput.inputMode = 'numeric';
+        otpInput.autocomplete = 'one-time-code';
+        otpInput.pattern = '\\d{6}';
+        otpInput.maxLength = 6;
+        otpInput.placeholder = '6-digit code';
+        otpInput.className = 'save-db-otp-input';
+        dlg.appendChild(otpInput);
+
+        if (errorText) appendError(errorText);
+
+        const actions = document.createElement('div');
+        actions.className = 'save-db-actions';
+        const cancel = btn('Cancel', () => dlg.close('cancel'));
+        const save = btn('Save', () => doSave(otpInput.value, expiresAtMs), 'primary');
+        save.disabled = true;
+        actions.append(cancel, save);
+        dlg.appendChild(actions);
+
+        otpInput.addEventListener('input', () => {
+            // Strip non-digits to make pasting easier.
+            const cleaned = otpInput.value.replace(/\D+/g, '').slice(0, 6);
+            if (cleaned !== otpInput.value) otpInput.value = cleaned;
+            save.disabled = !/^\d{6}$/.test(otpInput.value) || Date.now() >= expiresAtMs;
+        });
+        otpInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !save.disabled) {
+                e.preventDefault();
+                doSave(otpInput.value, expiresAtMs);
+            }
+        });
+        otpInput.focus();
+
+        const tick = () => {
+            const ms = Math.max(0, expiresAtMs - Date.now());
+            if (ms <= 0) {
+                countdown.textContent = 'Password expired — cancel and start over.';
+                countdown.classList.add('expired');
+                save.disabled = true;
+                if (countdownTimer) {
+                    clearInterval(countdownTimer);
+                    countdownTimer = null;
+                }
+                return;
+            }
+            const totalSec = Math.ceil(ms / 1000);
+            const m = Math.floor(totalSec / 60);
+            const s = totalSec % 60;
+            countdown.textContent = `Valid for ${m}:${String(s).padStart(2, '0')}.`;
+        };
+        tick();
+        countdownTimer = setInterval(tick, 1000);
+    }
+
+    async function doSave(otp, expiresAtMs) {
+        showSavingPhase();
+        let resp;
+        try {
+            resp = await fetch('/api/editor/maps', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({ otp, map: state.data }),
+            });
+        } catch (e) {
+            showEnterPhase(expiresAtMs, `Could not contact server: ${e.message}`);
+            return;
+        }
+        let data = null;
+        try { data = await resp.json(); } catch { /* ignore */ }
+        if (!resp.ok) {
+            const msg = (data && data.message) || `Server error (HTTP ${resp.status}).`;
+            // OTP-related failures: send back to phase 1 so a new code is requested.
+            if (data && data.error === 'otp_invalid') {
+                showRequestPhase(msg);
+            } else {
+                showEnterPhase(expiresAtMs, msg);
+            }
+            return;
+        }
+        markClean();
+        const name    = (data && data.name)    || state.data.name;
+        const version = (data && data.version) || '?';
+        setBanner(`Saved as "${name}" v${version}.`, 'success');
+        dlg.close('saved');
+    }
+
+    function showSavingPhase() {
+        cleanup();
+        dlg.replaceChildren();
+        appendTitle('Saving…');
+        const p = document.createElement('p');
+        p.className = 'save-db-text';
+        p.textContent = 'Submitting map to database…';
+        dlg.appendChild(p);
+    }
+
+    function appendTitle(text) {
+        const h = document.createElement('h2');
+        h.className = 'save-db-title';
+        h.textContent = text;
+        dlg.appendChild(h);
+    }
+
+    function appendError(text) {
+        const e = document.createElement('p');
+        e.className = 'save-db-error';
+        e.textContent = text;
+        dlg.appendChild(e);
+    }
+
+    function btn(label, onClick, cls) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = label;
+        if (cls) b.className = cls;
+        b.addEventListener('click', onClick);
+        return b;
+    }
+}
+
 async function onLoadFromDb() {
     let listResp;
     try {
@@ -1857,6 +2085,7 @@ function bootstrap() {
     els.btnLoadImage.addEventListener('click', onLoadImageClick);
     els.btnClearImage.addEventListener('click', onClearImage);
     els.btnSave.addEventListener('click', onSave);
+    els.btnSaveDb.addEventListener('click', onSaveToDb);
 
     els.fileJson.addEventListener('change', () => {
         onLoadJsonFile(els.fileJson.files && els.fileJson.files[0]);
