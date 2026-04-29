@@ -65,9 +65,7 @@
         </div>
 
         <h2>Tickets</h2>
-        <div class="placeholder-panel" id="tickets-list">
-            <p class="hint">Coming in a later slice.</p>
-        </div>
+        <div class="tickets-panel" id="tickets-list"></div>
     </aside>
 
 </main>

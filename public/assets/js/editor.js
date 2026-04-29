@@ -57,6 +57,7 @@ const state = {
     selection: null,
     addRouteFrom: null,  // stop id remembered as first click in Add route mode
     activeColorId: null, // color picked for newly created routes
+    editingTicket: null, // draft when editing/adding a ticket; { id?, ... } | null
     dirty: false,
 };
 
@@ -88,6 +89,7 @@ const els = {
     canvas:        document.getElementById('editor-canvas'),
     properties:    document.getElementById('properties-panel'),
     colorsList:    document.getElementById('colors-list'),
+    ticketsList:   document.getElementById('tickets-list'),
 
     fileJson:      document.getElementById('file-input-json'),
     fileImage:     document.getElementById('file-input-image'),
@@ -130,6 +132,7 @@ function render() {
     renderCanvas();
     renderColors();
     renderProperties();
+    renderTickets();
 }
 
 function renderMeta() {
@@ -558,6 +561,306 @@ function deleteColor(colorId) {
     markDirty();
     renderColors();
     renderProperties();
+}
+
+// ---------------------------------------------------------------------------
+// Tickets panel
+// ---------------------------------------------------------------------------
+
+function renderTickets() {
+    const list = els.ticketsList;
+    list.replaceChildren();
+
+    if (state.editingTicket !== null) {
+        list.appendChild(renderTicketEditor());
+    }
+
+    const visible = state.editingTicket !== null && state.editingTicket.id !== undefined
+        ? state.data.tickets.filter((t) => t.id !== state.editingTicket.id)
+        : state.data.tickets;
+
+    if (visible.length === 0 && state.editingTicket === null) {
+        list.appendChild(hintP('No tickets yet.'));
+    } else {
+        for (const t of visible) {
+            list.appendChild(renderTicketRow(t));
+        }
+    }
+
+    if (state.editingTicket === null) {
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'add-ticket-btn';
+        addBtn.textContent = '+ Add ticket';
+        if (state.data.stops.length < 2) {
+            addBtn.disabled = true;
+            addBtn.title = 'Add at least 2 stops first.';
+        }
+        addBtn.addEventListener('click', beginNewTicket);
+        list.appendChild(addBtn);
+    }
+}
+
+function renderTicketRow(ticket) {
+    const card = document.createElement('div');
+    card.className = 'ticket-card';
+
+    const route = document.createElement('div');
+    route.className = 'ticket-card-route';
+    const from = state.data.stops.find((s) => s.id === ticket.from_stop_id);
+    const to   = state.data.stops.find((s) => s.id === ticket.to_stop_id);
+    const fromName = from ? from.display_name : `#${ticket.from_stop_id}`;
+    const toName   = to   ? to.display_name   : `#${ticket.to_stop_id}`;
+
+    const text = document.createElement('span');
+    text.textContent = `${fromName} → ${toName}`;
+    route.appendChild(text);
+
+    if (ticket.is_long_route) {
+        const badge = document.createElement('span');
+        badge.className = 'ticket-long-badge';
+        badge.textContent = 'long';
+        route.append(' ', badge);
+    }
+    card.appendChild(route);
+
+    const meta = document.createElement('div');
+    meta.className = 'ticket-card-meta';
+
+    const pts = document.createElement('span');
+    pts.className = 'ticket-card-pts';
+    pts.textContent = `${ticket.points} pt${ticket.points === 1 ? '' : 's'}`;
+    meta.appendChild(pts);
+
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'ticket-edit-btn';
+    editBtn.textContent = 'Edit';
+    editBtn.addEventListener('click', () => beginEditTicket(ticket.id));
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'ticket-delete-btn';
+    deleteBtn.textContent = '×';
+    deleteBtn.title = 'Delete ticket';
+    deleteBtn.addEventListener('click', () => deleteTicket(ticket.id));
+
+    meta.append(editBtn, deleteBtn);
+    card.appendChild(meta);
+
+    return card;
+}
+
+function renderTicketEditor() {
+    const draft = state.editingTicket;
+    const card = document.createElement('div');
+    card.className = 'ticket-editor';
+
+    const title = document.createElement('h3');
+    title.className = 'ticket-editor-title';
+    title.textContent = draft.id === undefined
+        ? 'New ticket'
+        : `Edit ticket #${draft.id}`;
+    card.appendChild(title);
+
+    const stopOptions = [...state.data.stops]
+        .sort((a, b) => a.display_name.localeCompare(b.display_name))
+        .map((s) => ({ value: String(s.id), label: s.display_name }));
+
+    // Refs filled below; updateValidation reads them via closure.
+    let errorEl, saveBtn;
+    const updateValidation = () => {
+        const error = validateTicketDraft(draft);
+        errorEl.textContent = error || '';
+        errorEl.hidden = !error;
+        saveBtn.disabled = error !== null;
+    };
+
+    card.appendChild(ticketField('From', stopSelect(stopOptions, draft.from_stop_id, (v) => {
+        draft.from_stop_id = v;
+        updateValidation();
+    })));
+    card.appendChild(ticketField('To', stopSelect(stopOptions, draft.to_stop_id, (v) => {
+        draft.to_stop_id = v;
+        updateValidation();
+    })));
+
+    const ptsInput = document.createElement('input');
+    ptsInput.type = 'number';
+    ptsInput.min = '1';
+    ptsInput.step = '1';
+    ptsInput.value = String(draft.points);
+    ptsInput.className = 'ticket-pts-input';
+    ptsInput.addEventListener('input', () => {
+        const n = parseInt(ptsInput.value, 10);
+        draft.points = isNaN(n) ? 0 : n;
+        updateValidation();
+    });
+    ptsInput.addEventListener('blur', () => {
+        if (!Number.isFinite(draft.points) || draft.points < 1) {
+            draft.points = 1;
+            ptsInput.value = '1';
+            updateValidation();
+        }
+    });
+    card.appendChild(ticketField('Points', ptsInput));
+
+    const longRow = document.createElement('label');
+    longRow.className = 'ticket-long-row';
+    const longInput = document.createElement('input');
+    longInput.type = 'checkbox';
+    longInput.checked = draft.is_long_route;
+    longInput.addEventListener('change', () => {
+        draft.is_long_route = longInput.checked;
+    });
+    const longSpan = document.createElement('span');
+    longSpan.textContent = 'Long route';
+    longRow.append(longInput, longSpan);
+    card.appendChild(longRow);
+
+    errorEl = document.createElement('p');
+    errorEl.className = 'ticket-editor-error';
+    card.appendChild(errorEl);
+
+    const actions = document.createElement('div');
+    actions.className = 'ticket-editor-actions';
+
+    saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.className = 'ticket-save-btn';
+    saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', saveTicketDraft);
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'ticket-cancel-btn';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', cancelTicketDraft);
+
+    actions.append(saveBtn, cancelBtn);
+    card.appendChild(actions);
+
+    updateValidation();
+    return card;
+}
+
+function ticketField(labelText, control) {
+    const row = document.createElement('label');
+    row.className = 'ticket-field';
+    const l = document.createElement('span');
+    l.className = 'ticket-field-label';
+    l.textContent = labelText;
+    row.append(l, control);
+    return row;
+}
+
+function stopSelect(options, currentValue, onChange) {
+    const sel = document.createElement('select');
+    sel.className = 'ticket-stop-select';
+
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Select…';
+    placeholder.disabled = true;
+    sel.appendChild(placeholder);
+
+    for (const opt of options) {
+        const o = document.createElement('option');
+        o.value = opt.value;
+        o.textContent = opt.label;
+        sel.appendChild(o);
+    }
+    sel.value = currentValue !== null ? String(currentValue) : '';
+    sel.addEventListener('change', () => {
+        const val = sel.value === '' ? null : parseInt(sel.value, 10);
+        onChange(val);
+    });
+    return sel;
+}
+
+function validateTicketDraft(draft) {
+    if (draft.from_stop_id === null) return 'Pick a from-stop.';
+    if (draft.to_stop_id === null)   return 'Pick a to-stop.';
+    if (draft.from_stop_id === draft.to_stop_id) {
+        return 'From and to must be different stops.';
+    }
+    if (!Number.isFinite(draft.points) || draft.points < 1) {
+        return 'Points must be at least 1.';
+    }
+    const a = Math.min(draft.from_stop_id, draft.to_stop_id);
+    const b = Math.max(draft.from_stop_id, draft.to_stop_id);
+    for (const t of state.data.tickets) {
+        if (draft.id !== undefined && t.id === draft.id) continue;
+        const ta = Math.min(t.from_stop_id, t.to_stop_id);
+        const tb = Math.max(t.from_stop_id, t.to_stop_id);
+        if (ta === a && tb === b) {
+            return 'A ticket between these stops already exists.';
+        }
+    }
+    return null;
+}
+
+function beginNewTicket() {
+    state.editingTicket = {
+        from_stop_id: null,
+        to_stop_id: null,
+        points: 5,
+        is_long_route: false,
+    };
+    renderTickets();
+}
+
+function beginEditTicket(id) {
+    const t = state.data.tickets.find((x) => x.id === id);
+    if (!t) return;
+    state.editingTicket = {
+        id: t.id,
+        from_stop_id: t.from_stop_id,
+        to_stop_id: t.to_stop_id,
+        points: t.points,
+        is_long_route: t.is_long_route,
+    };
+    renderTickets();
+}
+
+function cancelTicketDraft() {
+    state.editingTicket = null;
+    renderTickets();
+}
+
+function saveTicketDraft() {
+    const draft = state.editingTicket;
+    if (validateTicketDraft(draft) !== null) return;
+
+    if (draft.id === undefined) {
+        const id = nextId(state.data.tickets);
+        state.data.tickets.push({
+            id,
+            from_stop_id: draft.from_stop_id,
+            to_stop_id: draft.to_stop_id,
+            points: draft.points,
+            is_long_route: draft.is_long_route,
+        });
+    } else {
+        const t = state.data.tickets.find((x) => x.id === draft.id);
+        if (t) {
+            t.from_stop_id  = draft.from_stop_id;
+            t.to_stop_id    = draft.to_stop_id;
+            t.points        = draft.points;
+            t.is_long_route = draft.is_long_route;
+        }
+    }
+    state.editingTicket = null;
+    markDirty();
+    renderTickets();
+}
+
+function deleteTicket(id) {
+    const idx = state.data.tickets.findIndex((t) => t.id === id);
+    if (idx === -1) return;
+    state.data.tickets.splice(idx, 1);
+    markDirty();
+    renderTickets();
 }
 
 function renderCanvas() {
@@ -1105,6 +1408,7 @@ function onNew() {
     state.bg = null;
     state.selection = null;
     state.activeColorId = null;
+    state.editingTicket = null;
     syncActiveColor();
     setBanner(null);
     markClean();
@@ -1137,6 +1441,7 @@ async function onLoadJsonFile(file) {
     state.data = merged;
     state.selection = null;
     state.activeColorId = null;
+    state.editingTicket = null;
     syncActiveColor();
     setBanner(null);
     markClean();
