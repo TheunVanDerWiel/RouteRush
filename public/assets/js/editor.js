@@ -601,7 +601,18 @@ function renderTickets() {
 
     if (state.editingTicket !== null) {
         list.appendChild(renderTicketEditor());
-    }
+    } else {
+	    const addBtn = document.createElement('button');
+	    addBtn.type = 'button';
+	    addBtn.className = 'add-ticket-btn';
+	    addBtn.textContent = '+ Add ticket';
+	    if (state.data.stops.length < 2) {
+	        addBtn.disabled = true;
+	        addBtn.title = 'Add at least 2 stops first.';
+	    }
+	    addBtn.addEventListener('click', beginNewTicket);
+	    list.appendChild(addBtn);
+	}
 
     const visible = state.editingTicket !== null && state.editingTicket.id !== undefined
         ? state.data.tickets.filter((t) => t.id !== state.editingTicket.id)
@@ -613,19 +624,6 @@ function renderTickets() {
         for (const t of visible) {
             list.appendChild(renderTicketRow(t));
         }
-    }
-
-    if (state.editingTicket === null) {
-        const addBtn = document.createElement('button');
-        addBtn.type = 'button';
-        addBtn.className = 'add-ticket-btn';
-        addBtn.textContent = '+ Add ticket';
-        if (state.data.stops.length < 2) {
-            addBtn.disabled = true;
-            addBtn.title = 'Add at least 2 stops first.';
-        }
-        addBtn.addEventListener('click', beginNewTicket);
-        list.appendChild(addBtn);
     }
 }
 
