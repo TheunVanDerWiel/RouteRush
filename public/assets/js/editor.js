@@ -68,6 +68,7 @@ const state = {
 const els = {
     btnNew:        document.getElementById('btn-new'),
     btnLoadJson:   document.getElementById('btn-load-json'),
+    btnLoadDb:     document.getElementById('btn-load-db'),
     btnLoadImage:  document.getElementById('btn-load-image'),
     btnClearImage: document.getElementById('btn-clear-image'),
     btnSave:       document.getElementById('btn-save'),
@@ -112,15 +113,31 @@ function markClean() {
 }
 
 function setBanner(message, kind = 'info') {
-    if (!message) {
+    const empty = !message || (Array.isArray(message) && message.length === 0);
+    if (empty) {
         els.banner.hidden = true;
-        els.banner.textContent = '';
+        els.banner.replaceChildren();
         els.banner.classList.remove('error');
         return;
     }
-    els.banner.textContent = message;
-    els.banner.hidden = false;
     els.banner.classList.toggle('error', kind === 'error');
+    els.banner.hidden = false;
+    els.banner.replaceChildren();
+    if (Array.isArray(message)) {
+        const heading = document.createElement('strong');
+        heading.textContent = `${message.length} validation error${message.length === 1 ? '' : 's'}:`;
+        els.banner.appendChild(heading);
+        const ul = document.createElement('ul');
+        ul.className = 'editor-banner-list';
+        for (const m of message) {
+            const li = document.createElement('li');
+            li.textContent = m;
+            ul.appendChild(li);
+        }
+        els.banner.appendChild(ul);
+    } else {
+        els.banner.textContent = message;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1146,9 +1163,13 @@ function deleteRoute(routeId) {
 }
 
 function handleMoveClick(pt) {
-    if (!state.selection) return;
     const x = Math.round(pt.x);
     const y = Math.round(pt.y);
+
+    if (!state.selection) {
+        moveAllRelativeToCentroid(x, y);
+        return;
+    }
     if (state.selection.kind === 'stop') {
         const stop = state.data.stops.find((s) => s.id === state.selection.id);
         if (!stop) return;
@@ -1166,6 +1187,37 @@ function handleMoveClick(pt) {
         markDirty();
         render();
     }
+}
+
+function moveAllRelativeToCentroid(targetX, targetY) {
+    const stops = state.data.stops;
+    if (stops.length === 0) return;
+
+    let sumX = 0;
+    let sumY = 0;
+    for (const s of stops) {
+        sumX += s.x;
+        sumY += s.y;
+    }
+    const cx = sumX / stops.length;
+    const cy = sumY / stops.length;
+
+    const dx = Math.round(targetX - cx);
+    const dy = Math.round(targetY - cy);
+    if (dx === 0 && dy === 0) return;
+
+    for (const s of stops) {
+        s.x += dx;
+        s.y += dy;
+    }
+    for (const r of state.data.routes) {
+        if (r.via_x !== null && r.via_y !== null) {
+            r.via_x += dx;
+            r.via_y += dy;
+        }
+    }
+    markDirty();
+    render();
 }
 
 function handleSelectClick(target) {
@@ -1470,6 +1522,13 @@ function mergeWithDefaults(parsed) {
 }
 
 function onSave() {
+    const errors = validateMap(state.data);
+    if (errors.length > 0) {
+        setBanner(errors, 'error');
+        return;
+    }
+    setBanner(null);
+
     const json = JSON.stringify(state.data, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
     const url  = URL.createObjectURL(blob);
@@ -1483,6 +1542,134 @@ function onSave() {
     markClean();
 }
 
+function validateMap(d) {
+    const errors = [];
+
+    // Map-level scalars
+    if (typeof d.name !== 'string' || d.name.trim() === '') {
+        errors.push('Name is required.');
+    }
+    if (!(d.viewbox_w > 0))            errors.push('Width must be greater than 0.');
+    if (!(d.viewbox_h > 0))            errors.push('Height must be greater than 0.');
+    if (!(d.starting_train_cards >= 0)) errors.push('Starting cards must be ≥ 0.');
+    if (!(d.locomotives_count >= 0))   errors.push('Locomotives must be ≥ 0.');
+    if (!(d.min_teams >= 2))           errors.push('Min teams must be ≥ 2.');
+    if (!(d.max_teams >= d.min_teams)) errors.push('Max teams must be ≥ min teams.');
+    if (!(d.max_teams <= 5))           errors.push('Max teams must be ≤ 5.');
+    if (!(d.starting_tickets_keep_min >= 1)) {
+        errors.push('Tickets keep min must be ≥ 1.');
+    }
+    if (!(d.starting_tickets_count >= d.starting_tickets_keep_min)) {
+        errors.push('Tickets initial must be ≥ keep min.');
+    }
+
+    // Stops
+    const stopIds   = new Set();
+    const stopNames = new Map();
+    for (const s of d.stops) {
+        stopIds.add(s.id);
+        if (typeof s.display_name !== 'string' || s.display_name.trim() === '') {
+            errors.push(`Stop #${s.id}: name is required.`);
+            continue;
+        }
+        const n = s.display_name.trim();
+        if (stopNames.has(n)) {
+            errors.push(`Duplicate stop name "${n}" (stops #${stopNames.get(n)} and #${s.id}).`);
+        } else {
+            stopNames.set(n, s.id);
+        }
+    }
+
+    // Colors
+    const colorIds = new Set(d.colors.map((c) => c.id));
+    if (d.routes.length > 0 && d.colors.length === 0) {
+        errors.push('At least one color is required when routes exist.');
+    }
+
+    // Routes
+    const routeKeys = new Map();
+    for (const r of d.routes) {
+        if (!stopIds.has(r.from_stop_id)) {
+            errors.push(`Route #${r.id}: from-stop #${r.from_stop_id} does not exist.`);
+        }
+        if (!stopIds.has(r.to_stop_id)) {
+            errors.push(`Route #${r.id}: to-stop #${r.to_stop_id} does not exist.`);
+        }
+        if (r.from_stop_id === r.to_stop_id) {
+            errors.push(`Route #${r.id}: from-stop and to-stop must differ.`);
+        }
+        if (!(r.length >= 1 && r.length <= 6)) {
+            errors.push(`Route #${r.id}: length must be between 1 and 6.`);
+        }
+        if (!colorIds.has(r.color_id)) {
+            errors.push(`Route #${r.id}: color #${r.color_id} does not exist.`);
+        }
+        if ((r.via_x === null) !== (r.via_y === null)) {
+            errors.push(`Route #${r.id}: via_x and via_y must both be set or both null.`);
+        }
+        const a = Math.min(r.from_stop_id, r.to_stop_id);
+        const b = Math.max(r.from_stop_id, r.to_stop_id);
+        const key = `${a}-${b}-${r.parallel_index}`;
+        if (routeKeys.has(key)) {
+            errors.push(
+                `Routes #${routeKeys.get(key)} and #${r.id} share the same stop pair `
+                + `with parallel index ${r.parallel_index}.`,
+            );
+        } else {
+            routeKeys.set(key, r.id);
+        }
+    }
+
+    // Tickets
+    const ticketKeys = new Map();
+    let regularTickets = 0;
+    let longTickets    = 0;
+    for (const t of d.tickets) {
+        if (!stopIds.has(t.from_stop_id)) {
+            errors.push(`Ticket #${t.id}: from-stop #${t.from_stop_id} does not exist.`);
+        }
+        if (!stopIds.has(t.to_stop_id)) {
+            errors.push(`Ticket #${t.id}: to-stop #${t.to_stop_id} does not exist.`);
+        }
+        if (t.from_stop_id === t.to_stop_id) {
+            errors.push(`Ticket #${t.id}: from-stop and to-stop must differ.`);
+        }
+        if (!(t.points >= 1)) {
+            errors.push(`Ticket #${t.id}: points must be ≥ 1.`);
+        }
+        const a = Math.min(t.from_stop_id, t.to_stop_id);
+        const b = Math.max(t.from_stop_id, t.to_stop_id);
+        const key = `${a}-${b}`;
+        if (ticketKeys.has(key)) {
+            errors.push(
+                `Tickets #${ticketKeys.get(key)} and #${t.id} have the same endpoints `
+                + `(direction does not matter).`,
+            );
+        } else {
+            ticketKeys.set(key, t.id);
+        }
+        if (t.is_long_route) longTickets++;
+        else                 regularTickets++;
+    }
+
+    // Ticket pool sized for a full table
+    const needRegular = (d.starting_tickets_count || 0) * (d.max_teams || 0);
+    if (regularTickets < needRegular) {
+        errors.push(
+            `Need at least ${needRegular} regular tickets for a full ${d.max_teams}-team game `
+            + `(have ${regularTickets}).`,
+        );
+    }
+    if (longTickets < (d.max_teams || 0)) {
+        errors.push(
+            `Need at least ${d.max_teams} long-route tickets for a full ${d.max_teams}-team game `
+            + `(have ${longTickets}).`,
+        );
+    }
+
+    return errors;
+}
+
 function filenameFor(name) {
     const slug = String(name || 'map')
         .toLowerCase()
@@ -1490,6 +1677,122 @@ function filenameFor(name) {
         .replace(/^-+|-+$/g, '')
         .slice(0, 60) || 'map';
     return `${slug}.json`;
+}
+
+async function onLoadFromDb() {
+    let listResp;
+    try {
+        listResp = await fetch('/api/editor/maps');
+    } catch (e) {
+        setBanner(`Could not contact server: ${e.message}`, 'error');
+        return;
+    }
+    if (!listResp.ok) {
+        setBanner(`Could not load map list (HTTP ${listResp.status}).`, 'error');
+        return;
+    }
+    let listData;
+    try {
+        listData = await listResp.json();
+    } catch (e) {
+        setBanner(`Map list: ${e.message}`, 'error');
+        return;
+    }
+    const maps = (listData && Array.isArray(listData.maps)) ? listData.maps : [];
+    if (maps.length === 0) {
+        setBanner('No maps in the database yet.', 'error');
+        return;
+    }
+
+    const chosenId = await showDbLoadDialog(maps);
+    if (chosenId === null) return;
+
+    let mapResp;
+    try {
+        mapResp = await fetch(`/api/editor/maps/${encodeURIComponent(chosenId)}`);
+    } catch (e) {
+        setBanner(`Could not contact server: ${e.message}`, 'error');
+        return;
+    }
+    if (!mapResp.ok) {
+        setBanner(`Could not load map (HTTP ${mapResp.status}).`, 'error');
+        return;
+    }
+    let mapData;
+    try {
+        mapData = await mapResp.json();
+    } catch (e) {
+        setBanner(`Map data: ${e.message}`, 'error');
+        return;
+    }
+
+    const merged = mergeWithDefaults(mapData);
+    if (!merged) return;
+    state.data = merged;
+    state.selection = null;
+    state.activeColorId = null;
+    state.editingTicket = null;
+    syncActiveColor();
+    setBanner(null);
+    markClean();
+    render();
+}
+
+function showDbLoadDialog(maps) {
+    return new Promise((resolve) => {
+        const dlg = document.createElement('dialog');
+        dlg.className = 'load-db-dialog';
+
+        const title = document.createElement('h2');
+        title.className = 'load-db-title';
+        title.textContent = 'Load map from database';
+        dlg.appendChild(title);
+
+        const sel = document.createElement('select');
+        sel.className = 'load-db-select';
+        for (const m of maps) {
+            const opt = document.createElement('option');
+            opt.value = String(m.id);
+            opt.textContent = `${m.name} (v${m.version})`;
+            sel.appendChild(opt);
+        }
+        sel.value = String(maps[0].id);
+        dlg.appendChild(sel);
+
+        const actions = document.createElement('div');
+        actions.className = 'load-db-actions';
+
+        const cancel = document.createElement('button');
+        cancel.type = 'button';
+        cancel.textContent = 'Cancel';
+        cancel.addEventListener('click', () => dlg.close('cancel'));
+
+        const load = document.createElement('button');
+        load.type = 'button';
+        load.className = 'primary';
+        load.textContent = 'Load';
+        load.addEventListener('click', () => dlg.close('load'));
+
+        sel.addEventListener('dblclick', () => dlg.close('load'));
+        sel.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                dlg.close('load');
+            }
+        });
+
+        actions.append(cancel, load);
+        dlg.appendChild(actions);
+
+        dlg.addEventListener('close', () => {
+            const result = dlg.returnValue === 'load' ? parseInt(sel.value, 10) : null;
+            dlg.remove();
+            resolve(Number.isFinite(result) ? result : null);
+        });
+
+        document.body.appendChild(dlg);
+        dlg.showModal();
+    });
 }
 
 function onLoadImageClick() {
@@ -1550,6 +1853,7 @@ function bootstrap() {
 
     els.btnNew.addEventListener('click', onNew);
     els.btnLoadJson.addEventListener('click', onLoadJsonClick);
+    els.btnLoadDb.addEventListener('click', onLoadFromDb);
     els.btnLoadImage.addEventListener('click', onLoadImageClick);
     els.btnClearImage.addEventListener('click', onClearImage);
     els.btnSave.addEventListener('click', onSave);

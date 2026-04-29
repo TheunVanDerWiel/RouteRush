@@ -132,12 +132,23 @@ body.editor-body {
     border-bottom: 1px solid #fcd9b6;
     color: #92400e;
     font-size: 0.9rem;
+    max-height: 12em;
+    overflow-y: auto;
 }
 
 .editor-banner.error {
     background: #fef2f2;
     border-bottom-color: #fecaca;
     color: var(--ed-error);
+}
+
+.editor-banner-list {
+    margin: 4px 0 0;
+    padding-left: 20px;
+}
+
+.editor-banner-list li {
+    margin: 2px 0;
 }
 
 /* ---------- Main grid ---------- */
@@ -427,6 +438,257 @@ select.props-input {
 .add-color-btn:hover {
     background: var(--ed-bg);
     color: var(--ed-ink);
+}
+
+/* ---------- Tickets panel ---------- */
+
+.ticket-card {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px;
+    border: 1px solid var(--ed-border);
+    border-radius: 6px;
+    margin-bottom: 6px;
+    background: var(--ed-surface);
+}
+
+.ticket-card-route {
+    font-weight: 600;
+}
+
+.ticket-long-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--ed-accent);
+    color: var(--ed-accent-ink);
+    font-size: 0.7rem;
+    font-weight: 700;
+    vertical-align: middle;
+    margin-left: 4px;
+}
+
+.ticket-card-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+    color: var(--ed-ink-soft);
+}
+
+.ticket-card-pts {
+    flex: 1;
+}
+
+.ticket-edit-btn,
+.ticket-delete-btn {
+    appearance: none;
+    border: 1px solid var(--ed-border);
+    background: var(--ed-surface);
+    color: var(--ed-ink);
+    padding: 3px 8px;
+    font-size: 0.8rem;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.ticket-delete-btn {
+    width: 26px;
+    padding: 3px 0;
+    text-align: center;
+}
+
+.ticket-edit-btn:hover {
+    background: var(--ed-bg);
+}
+
+.ticket-delete-btn:hover {
+    background: #fef2f2;
+    color: var(--ed-error);
+    border-color: #fecaca;
+}
+
+.ticket-editor {
+    border: 1px solid var(--ed-accent);
+    border-radius: 6px;
+    padding: 10px;
+    margin-bottom: 12px;
+    background: #f0f4fa;
+}
+
+.ticket-editor-title {
+    margin: 0 0 8px;
+    font-size: 0.95rem;
+    font-weight: 700;
+}
+
+.ticket-field {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 6px;
+    margin: 4px 0;
+    font-size: 0.85rem;
+}
+
+.ticket-field-label {
+    color: var(--ed-ink-soft);
+    flex-shrink: 0;
+}
+
+.ticket-stop-select,
+.ticket-pts-input {
+    flex: 1;
+    min-width: 0;
+    padding: 4px 6px;
+    border: 1px solid var(--ed-border);
+    border-radius: 4px;
+    font: inherit;
+    color: var(--ed-ink);
+    background: var(--ed-surface);
+}
+
+.ticket-pts-input {
+    flex: 0 0 auto;
+    width: 5em;
+    text-align: right;
+}
+
+.ticket-long-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+.ticket-editor-error {
+    margin: 4px 0;
+    color: var(--ed-error);
+    font-size: 0.8rem;
+}
+
+.ticket-editor-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.ticket-save-btn,
+.ticket-cancel-btn {
+    appearance: none;
+    border: 1px solid var(--ed-border);
+    padding: 6px 12px;
+    font-size: 0.85rem;
+    border-radius: 6px;
+    cursor: pointer;
+    background: var(--ed-surface);
+    color: var(--ed-ink);
+}
+
+.ticket-save-btn {
+    background: var(--ed-accent);
+    color: var(--ed-accent-ink);
+    border-color: var(--ed-accent);
+}
+
+.ticket-save-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.ticket-cancel-btn:hover {
+    background: var(--ed-bg);
+}
+
+.add-ticket-btn {
+    appearance: none;
+    border: 1px dashed var(--ed-border);
+    background: transparent;
+    color: var(--ed-ink-soft);
+    padding: 8px;
+    width: 100%;
+    font-size: 0.85rem;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-top: 4px;
+}
+
+.add-ticket-btn:hover:not(:disabled) {
+    background: var(--ed-bg);
+    color: var(--ed-ink);
+}
+
+.add-ticket-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ---------- Load-from-DB dialog ---------- */
+
+.load-db-dialog {
+    border: none;
+    border-radius: var(--ed-radius);
+    padding: 20px;
+    min-width: 320px;
+    max-width: 480px;
+    background: var(--ed-surface);
+    color: var(--ed-ink);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+
+.load-db-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.4);
+}
+
+.load-db-title {
+    margin: 0 0 12px;
+    font-size: 1.05rem;
+    font-weight: 700;
+}
+
+.load-db-select {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid var(--ed-border);
+    border-radius: 6px;
+    font: inherit;
+    color: var(--ed-ink);
+    background: var(--ed-surface);
+}
+
+.load-db-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+.load-db-actions button {
+    appearance: none;
+    border: 1px solid var(--ed-border);
+    background: var(--ed-surface);
+    color: var(--ed-ink);
+    padding: 6px 14px;
+    font-size: 0.9rem;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.load-db-actions button:hover {
+    background: var(--ed-bg);
+}
+
+.load-db-actions button.primary {
+    background: var(--ed-accent);
+    color: var(--ed-accent-ink);
+    border-color: var(--ed-accent);
+}
+
+.load-db-actions button.primary:hover {
+    filter: brightness(1.1);
 }
 
 .hint {

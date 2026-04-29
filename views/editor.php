@@ -13,6 +13,7 @@
     <div class="editor-actions">
         <button type="button" id="btn-new">New</button>
         <button type="button" id="btn-load-json">Load JSON…</button>
+        <button type="button" id="btn-load-db">Load from DB…</button>
         <button type="button" id="btn-load-image">Load image…</button>
         <button type="button" id="btn-clear-image" hidden>Clear image</button>
         <button type="button" id="btn-save" class="primary">Save…</button>
@@ -36,7 +37,7 @@
     </label>
 </section>
 
-<p class="editor-banner" id="editor-banner" hidden></p>
+<div class="editor-banner" id="editor-banner" hidden></div>
 
 <main class="editor-main">
 

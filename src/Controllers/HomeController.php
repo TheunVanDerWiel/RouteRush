@@ -13,8 +13,13 @@ final class HomeController
 
     public function index(): Response
     {
+        // Only the latest version per name is offered for new games; older
+        // versions remain referenced by games.map_id and are unaffected.
         $maps = $this->pdo->query(
-            'SELECT id, name, min_teams, max_teams FROM maps ORDER BY name'
+            'SELECT id, name, min_teams, max_teams
+               FROM maps m
+              WHERE version = (SELECT MAX(version) FROM maps WHERE name = m.name)
+           ORDER BY name'
         )->fetchAll();
 
         return Response::html(View::render('home', ['maps' => $maps]));

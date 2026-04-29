@@ -44,6 +44,8 @@ final class App
         $this->router->get('/editor',           fn() => (new HomeController($pdo))->editor());
 
         $this->router->get('/api/maps',                              fn() => (new MapController($pdo))->index());
+        $this->router->get('/api/editor/maps',                       fn() => (new MapController($pdo))->listAll());
+        $this->router->get('/api/editor/maps/{id}',                  fn(Request $r, array $p) => (new MapController($pdo))->show($p['id']));
         $this->router->post('/api/games',                            fn(Request $r) => (new GameController($pdo))->create($r));
         $this->router->get('/api/games/{code}',                      fn(Request $r, array $p) => (new GameController($pdo))->show($p['code']));
         $this->router->get('/api/games/{code}/map',                  fn(Request $r, array $p) => (new GameController($pdo))->map($p['code']));
