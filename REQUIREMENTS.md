@@ -134,7 +134,8 @@ is recoverable via room code + team PIN (rejoin after a phone dies).
 
 ### Draw windows (real-time)
 - Each team accumulates one **draw window** every 5 minutes since game
-  start, starting at 1 **draw window** immediately.
+  start. The first window arrives 5 minutes after the game starts;
+  drawing is blocked during the first 5 minutes.
 - A draw window is consumed by either:
   - **Drawing 2 train cards** (random from deck), OR
   - **Drawing 2 destination tickets, keeping ≥ 1**.

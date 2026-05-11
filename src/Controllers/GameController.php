@@ -513,7 +513,7 @@ final class GameController
             $startedAt = new \DateTimeImmutable($row['started_at'], new \DateTimeZone('UTC'));
             $now       = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
             $elapsed   = max(0, $now->getTimestamp() - $startedAt->getTimestamp());
-            $accrued   = intdiv($elapsed, 300) + 1;
+            $accrued   = intdiv($elapsed, 300);
             $windowsAvailable    = max(0, $accrued - $windowsConsumed);
             $nextWindowInSeconds = 300 - ($elapsed % 300);
         }
@@ -848,7 +848,7 @@ final class GameController
             $startedAt = new \DateTimeImmutable($row['started_at'], new \DateTimeZone('UTC'));
             $now       = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
             $elapsed   = max(0, $now->getTimestamp() - $startedAt->getTimestamp());
-            $accrued   = intdiv($elapsed, 300) + 1;
+            $accrued   = intdiv($elapsed, 300);
             $available = max(0, $accrued - $consumed);
             if ($available <= 0) {
                 $this->pdo->rollBack();
@@ -994,7 +994,7 @@ final class GameController
             $startedAt = new \DateTimeImmutable($row['started_at'], new \DateTimeZone('UTC'));
             $now       = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
             $elapsed   = max(0, $now->getTimestamp() - $startedAt->getTimestamp());
-            $accrued   = intdiv($elapsed, 300) + 1;
+            $accrued   = intdiv($elapsed, 300);
             $available = max(0, $accrued - $consumed);
             if ($available <= 0) {
                 $this->pdo->rollBack();
