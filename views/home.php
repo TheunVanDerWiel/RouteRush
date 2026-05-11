@@ -36,6 +36,7 @@ use RouteRush\View;
                     <?php endforeach; ?>
                 </select>
             </label>
+            <div class="map-frame map-frame-preview" id="map-preview"></div>
             <label>
                 Duration (minutes)
                 <input type="number" name="duration_minutes" min="15" max="240" step="15" value="120" required>

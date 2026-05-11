@@ -301,6 +301,15 @@ button:disabled {
     background: #f0f3f8;
 }
 
+/* Shorter preview used in the lobby and home page. Reuses the same SVG
+   renderer but caps the height so the map doesn't dominate the layout. */
+.map-frame-preview {
+    height: 45vh;
+    margin-top: 12px;
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+
 .map-zoom-controls {
     position: absolute;
     bottom: 12px;

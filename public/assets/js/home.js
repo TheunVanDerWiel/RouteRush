@@ -1,9 +1,47 @@
 import { loadSession, clearSession } from './session.js';
+import { renderMap } from './map-render.js';
 
 const createForm = document.getElementById('create-game-form');
 const createError = document.getElementById('create-error');
 const joinForm = document.getElementById('join-form');
 const joinError = document.getElementById('join-error');
+
+// Map preview wired to the map-selection dropdown. Fetches the full editor
+// JSON for the picked map id and renders it into the preview frame.
+const mapSelect = createForm.querySelector('select[name="map_id"]');
+const mapPreviewEl = document.getElementById('map-preview');
+let previewToken = 0;
+
+async function refreshMapPreview() {
+    if (!mapSelect || !mapPreviewEl) return;
+    const mapId = parseInt(mapSelect.value, 10);
+    if (!Number.isInteger(mapId) || mapId <= 0) {
+        mapPreviewEl.replaceChildren();
+        return;
+    }
+    const ticket = ++previewToken;
+    let res;
+    try {
+        res = await fetch(`/api/editor/maps/${encodeURIComponent(mapId)}`, {
+            headers: { Accept: 'application/json' },
+        });
+    } catch {
+        return;
+    }
+    if (ticket !== previewToken) return;  // user changed selection mid-fetch
+    if (!res.ok) {
+        mapPreviewEl.replaceChildren();
+        return;
+    }
+    const map = await res.json();
+    if (ticket !== previewToken) return;
+    renderMap(mapPreviewEl, map);
+}
+
+if (mapSelect) {
+    mapSelect.addEventListener('change', refreshMapPreview);
+    refreshMapPreview();
+}
 
 // On page load, if we still have a saved session, try to silently rejoin
 // the user's last game. Lobby → /lobby, in_progress (not yet expired) →

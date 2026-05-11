@@ -1,4 +1,5 @@
 import { saveSession } from './session.js';
+import { renderMap } from './map-render.js';
 
 const code = document.body.dataset.gameCode;
 const playerIdInitial = document.body.dataset.playerId
@@ -9,6 +10,25 @@ const teamList = document.getElementById('team-list');
 const gameInfo = document.getElementById('game-info');
 const mapNameEl = document.getElementById('map-name');
 const durationEl = document.getElementById('duration');
+const mapPreviewEl = document.getElementById('map-preview');
+
+let mapPreviewRendered = false;
+
+async function loadMapPreviewOnce() {
+    if (mapPreviewRendered) return;
+    mapPreviewRendered = true;
+    try {
+        const res = await fetch(`/api/games/${encodeURIComponent(code)}/map`, {
+            headers: { Accept: 'application/json' },
+        });
+        if (!res.ok) return;
+        const map = await res.json();
+        renderMap(mapPreviewEl, map);
+    } catch {
+        // Best-effort: leave the preview empty if the fetch fails.
+        mapPreviewRendered = false;
+    }
+}
 
 const createSection = document.getElementById('create-team-section');
 const createForm = document.getElementById('create-team-form');
@@ -96,6 +116,7 @@ function renderState(state) {
     mapNameEl.textContent = state.map.name;
     durationEl.textContent = Math.round(state.duration_seconds / 60);
     gameInfo.hidden = false;
+    loadMapPreviewOnce();
 
     if (state.you) {
         myPlayerId = state.you.player_id;

@@ -22,6 +22,7 @@ use RouteRush\View;
     <section class="card" id="game-info" hidden>
         <h2 id="map-name"></h2>
         <p>Duration: <span id="duration"></span> minutes</p>
+        <div class="map-frame map-frame-preview" id="map-preview"></div>
     </section>
 
     <section class="card">
