@@ -11,6 +11,16 @@ const gameInfo = document.getElementById('game-info');
 const mapNameEl = document.getElementById('map-name');
 const durationEl = document.getElementById('duration');
 const mapPreviewEl = document.getElementById('map-preview');
+const shareBtn = document.getElementById('btn-share');
+
+if (shareBtn) {
+    shareBtn.addEventListener('click', () => {
+        const joinUrl = `${window.location.origin}/lobby/${encodeURIComponent(code)}`;
+        const message = `Join my Route Rush game: ${joinUrl}`;
+        const shareUrl = `https://api.whatsapp.com/send/?text=${encodeURIComponent(message)}`;
+        window.open(shareUrl, '_blank', 'noopener');
+    });
+}
 
 let mapPreviewRendered = false;
 

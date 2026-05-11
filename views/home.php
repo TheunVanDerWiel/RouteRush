@@ -18,7 +18,13 @@ use RouteRush\View;
         <p><a href="/rules" target="_blank" rel="noopener" class="rules-button">More info</a></p>
     </header>
 
-    <section class="card">
+    <section class="home-menu" id="home-menu">
+        <button type="button" id="btn-show-create" class="home-menu-btn">Start a new game</button>
+        <button type="button" id="btn-show-join"   class="home-menu-btn">Join an existing game</button>
+    </section>
+
+    <section class="card" id="create-card" hidden>
+        <button type="button" class="back-button" aria-label="Back to menu">← Back</button>
         <h2>Start a new game</h2>
         <form id="create-game-form" novalidate>
             <label>
@@ -46,7 +52,8 @@ use RouteRush\View;
         </form>
     </section>
 
-    <section class="card">
+    <section class="card" id="join-card" hidden>
+        <button type="button" class="back-button" aria-label="Back to menu">← Back</button>
         <h2>Join an existing game</h2>
         <form id="join-form" novalidate>
             <label>

@@ -15,7 +15,12 @@ use RouteRush\View;
 <main class="container">
     <header>
         <h1>Lobby</h1>
-        <p class="room-code" aria-label="Room code"><?= View::escape($code) ?></p>
+        <div class="room-row">
+            <p class="room-code" aria-label="Room code"><?= View::escape($code) ?></p>
+            <button type="button" id="btn-share" class="share-button" aria-label="Share join link via WhatsApp">
+                Share
+            </button>
+        </div>
         <p class="hint">Share this code with the other teams.</p>
     </header>
 
@@ -23,13 +28,6 @@ use RouteRush\View;
         <h2 id="map-name"></h2>
         <p>Duration: <span id="duration"></span> minutes</p>
         <div class="map-frame map-frame-preview" id="map-preview"></div>
-    </section>
-
-    <section class="card">
-        <h2>Teams</h2>
-        <ul id="team-list" class="team-list">
-            <li class="empty">Loading…</li>
-        </ul>
     </section>
 
     <section class="card" id="create-team-section">
@@ -47,6 +45,13 @@ use RouteRush\View;
             <button type="submit">Create team</button>
             <p class="error" id="create-team-error" role="alert"></p>
         </form>
+    </section>
+
+    <section class="card">
+        <h2>Teams</h2>
+        <ul id="team-list" class="team-list">
+            <li class="empty">Loading…</li>
+        </ul>
     </section>
 
     <section class="card" id="join-team-section">

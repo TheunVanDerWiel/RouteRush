@@ -6,6 +6,34 @@ const createError = document.getElementById('create-error');
 const joinForm = document.getElementById('join-form');
 const joinError = document.getElementById('join-error');
 
+// Menu-style toggle: only the menu shows by default; clicking a menu
+// button reveals the matching card, "Back" returns to the menu.
+const homeMenu  = document.getElementById('home-menu');
+const createCard = document.getElementById('create-card');
+const joinCard   = document.getElementById('join-card');
+
+function showCard(card) {
+    homeMenu.hidden  = true;
+    createCard.hidden = card !== createCard;
+    joinCard.hidden   = card !== joinCard;
+}
+
+function showMenu() {
+    homeMenu.hidden  = false;
+    createCard.hidden = true;
+    joinCard.hidden   = true;
+}
+
+document.getElementById('btn-show-create').addEventListener('click', () => {
+    showCard(createCard);
+});
+document.getElementById('btn-show-join').addEventListener('click', () => {
+    showCard(joinCard);
+});
+for (const btn of document.querySelectorAll('.back-button')) {
+    btn.addEventListener('click', showMenu);
+}
+
 // Map preview wired to the map-selection dropdown. Fetches the full editor
 // JSON for the picked map id and renders it into the preview frame.
 const mapSelect = createForm.querySelector('select[name="map_id"]');
